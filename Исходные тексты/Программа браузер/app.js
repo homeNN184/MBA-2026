@@ -1,0 +1,1890 @@
+/* Автор и разработчик: Postautov_K_V */
+/* Интерфейс браузерной программы расчета модели интеграции */
+const C = ["#2F6FC0", "#C4690E", "#8E44AD", "#1B9E77"];
+const SC = ["BASE", "TRL7", "TRL6", "TRL5"];
+const SCL = { BASE: "Базовый", TRL7: "Интеграция TRL7", TRL6: "Интеграция TRL6", TRL5: "Интеграция TRL5" };
+const COL = { BASE: C[0], TRL7: C[1], TRL6: C[2], TRL5: C[3] };
+
+/* Поля формы: k — ключ, l — подпись, t — тип, p — хранится долей, показывается процентом,
+   h — расширенная подсказка. */
+const FIELDS = [
+  ["Критерий выбора", [
+    { k: "prefer_reserve", l: "Приоритет запаса в стресс-сценарии", t: "bool",
+      h: "При включении выбирается наибольший остаток преимущества при всех доработках. При выключении выбирается наибольший ожидаемый ЧДД. Флажок действует, пока выключена критериальная оценка." },
+    { k: "use_crit", l: "Критериальная оценка", t: "bool",
+      h: "При включении выбор делается по шестикритериальной оценке раздела 3.3 работы среди базового варианта и допущенных сценариев, а флажок приоритета запаса не действует. Параметры оценки задаются тремя следующими полями и влияют на результат." },
+    { k: "crit_w", l: "Веса шести критериев, %", t: "vec",
+      h: "Порядок весов следующий: ЧДД, срок ввода, остаток преимущества в наихудшем исходе, доказательность TRL, ресурсная нагрузка, запас устойчивости. Сумма должна равняться 100 %. Базовые веса 30, 15, 15, 15, 10 и 15 приняты в разделе 3.3 работы, наибольший вес отдан ЧДД, а устойчивость учтена двумя критериями по 15 %." },
+    { k: "q_evid", l: "Доказательность TRL по вариантам, от 1 до 5", t: "vec",
+      h: "Экспертная оценка для базового варианта, входа на TRL7, TRL6 и TRL5, где 5 соответствует наилучшему значению. Оценка 5 означает, что уровни TRL1–TRL7 подтверждены на опытной инфраструктуре до начала проектирования, а TRL8 и TRL9 подтверждены на самом объекте. Оценка 4 означает начало проектирования по зафиксированной конфигурации с подтверждением высших уровней на объекте. Оценка 3 означает проектирование по незафиксированной конфигурации либо подтверждение TRL9 на демонтируемой опытной инфраструктуре, когда оборудование, передаваемое в эксплуатацию, заново не подтверждается." },
+    { k: "q_load", l: "Ресурсная нагрузка по вариантам, от 1 до 5", t: "vec",
+      h: "Экспертная оценка потребности в ресурсах и управленческом внимании для базового варианта, входа на TRL7, TRL6 и TRL5, где 5 соответствует наименьшей нагрузке. Оценка 5 отвечает последовательной организации работ без параллельных потоков. Оценка 3 отвечает параллельному выполнению разработки и строительства без опытной инфраструктуры. Оценка 2 отвечает параллельному выполнению вместе с опытной инфраструктурой, демонтажем, перевозкой и повторным монтажом оборудования на объекте." }
+  ]],
+  ["Бюджет, сроки и ставка", [
+    { k: "budget", l: "Бюджет проекта, млн руб.", t: "num",
+      h: "Полная стоимость инвестиционного проекта в постоянных ценах без налога на добавленную стоимость. Делится на инновационную и инвестиционную части по следующему полю. Расчет ведется на нормированных данных, поэтому абсолютное значение задает масштаб, а выводы определяются соотношениями между сценариями." },
+    { k: "share_inn", l: "Доля инновационной части в бюджете, %", t: "num", p: 1,
+      h: "Часть бюджета, приходящаяся на разработку и изготовление инновационного оборудования. Остаток относится к строительству объекта. При 35 % и бюджете 1000 млн руб. инновационная часть равна 350 млн руб. Чем выше доля, тем больше выигрыш интеграции." },
+    { k: "rate", l: "Ставка дисконтирования, % годовых", t: "num", p: 1,
+      h: "Норма дисконта для приведения денежных потоков к началу расчетного периода. Применяется ко всем сценариям одинаково. Устойчивость результата проверена в диапазоне от 10 до 16 % годовых." },
+    { k: "t_dev", l: "Срок разработки TRL1→TRL9, лет", t: "num",
+      h: "Полная длительность инновационного процесса от первого уровня готовности технологии до девятого. Распределяется между восемью переходами по долям времени." },
+    { k: "t_inv", l: "Срок строительства, лет", t: "num",
+      h: "Длительность инвестиционного строительного процесса от исходных данных до комплексного опробования. Распределяется между восемью стадиями по долям времени." },
+    { k: "n_years", l: "Расчетный период, лет", t: "int",
+      h: "Горизонт расчета денежных потоков. Отсчитывается от начала разработки и включает разработку, строительство и эксплуатацию. Отличается от срока эксплуатации тем, что охватывает проект целиком, тогда как срок эксплуатации отсчитывается от ввода объекта." },
+    { k: "first_tax_year", l: "Первый год расчетного периода", t: "int",
+      h: "Календарный год, на который приходится первый расчетный год. Используется для подписи лет в таблицах и для применения предела зачета убытка." },
+    { k: "w_time", l: "Доли времени переходов TRL1→2 … TRL8→9, %", t: "vec",
+      h: "Распределение срока разработки между восемью переходами уровней готовности. Восемь значений через точку с запятой, сумма должна равняться 100 %." },
+    { k: "w_tax", l: "Доли инновационных затрат по переходам TRL1→2 … TRL8→9, %", t: "vec",
+      h: "Распределение инновационной части бюджета между восемью переходами. Эти же доли определяют признание расходов на научные исследования и опытно-конструкторские разработки: расход каждого перехода уменьшает налоговую базу в том году, в котором этап завершен. Восемь значений, сумма 100 %." },
+    { k: "stage_share", l: "Доли времени стадий строительства, %", t: "vec",
+      h: "Распределение срока строительства между восемью стадиями, от исходных данных до комплексного опробования. Восемь значений, сумма 100 %." }
+  ]],
+  ["Эксплуатация", [
+    { k: "op_years", l: "Срок эксплуатации объекта, лет", t: "int",
+      h: "Длительность работы объекта, отсчитывается от ввода в эксплуатацию. Выручка и операционные расходы учитываются только внутри этого срока и внутри расчетного периода." },
+    { k: "revenue", l: "Выручка при полной загрузке, млн руб. в год", t: "num",
+      h: "Годовая выручка объекта при стопроцентной загрузке в постоянных ценах." },
+    { k: "load", l: "Загрузка по годам эксплуатации, %", t: "vecfree", p: 1,
+      h: "Загрузка в первые годы работы объекта, одно значение на год, через точку с запятой. После перечисленных лет загрузка принимается равной 100 %. Число значений произвольное: 20; 60 задает два года выхода на режим, 20; 60; 90 задает три года." },
+    { k: "staff", l: "Численность персонала, человек", t: "int",
+      h: "Штатная численность персонала объекта в период эксплуатации." },
+    { k: "salary_k", l: "Средняя заработная плата одного работника, тыс. руб. в месяц", t: "num",
+      h: "Среднемесячная заработная плата одного работника. Годовой фонд оплаты труда равен численности, умноженной на заработную плату и на двенадцать месяцев." },
+    { k: "markup", l: "Начисления на заработную плату, % фонда оплаты труда", t: "num", p: 1,
+      h: "Страховые взносы и прочие начисления. Считаются от годового фонда оплаты труда." },
+    { k: "admin", l: "Административные расходы, % фонда оплаты труда", t: "num", p: 1,
+      h: "Накладные и административные расходы. Считаются от годового фонда оплаты труда, а не от выручки и не от бюджета." },
+    { k: "to_rate", l: "Техническое обслуживание, % бюджета проекта в год", t: "num", p: 1,
+      h: "Годовые затраты на техническое обслуживание в долях бюджета проекта. Учитываются в каждом году эксплуатации." },
+    { k: "tr_rate", l: "Текущий ремонт, % бюджета проекта за один ремонт", t: "num", p: 1,
+      h: "Затраты на один текущий ремонт в долях бюджета проекта. Текущие ремонты приходятся на 3, 6, 9 … 30-й годы эксплуатации." },
+    { k: "kr_rate", l: "Капитальный ремонт, % бюджета проекта за один ремонт", t: "num", p: 1,
+      h: "Затраты на один капитальный ремонт в долях бюджета проекта. Капитальные ремонты приходятся на 5, 10, 15, 20, 25 и 30-й годы эксплуатации." }
+  ]],
+  ["Налоги", [
+    { k: "tax", l: "Ставка налога на прибыль, %", t: "num", p: 1,
+      h: "Ставка налога на прибыль организаций. С 1 января 2025 года составляет 25 %." },
+    { k: "amort_years", l: "Срок амортизации, лет", t: "int",
+      h: "Срок линейной амортизации инвестиционной части бюджета. Отсчитывается от ввода объекта в эксплуатацию." },
+    { k: "loss_limit", l: "Предел зачета убытка, % налоговой базы", t: "num", p: 1,
+      h: "Накопленный убыток прошлых лет уменьшает налоговую базу текущего года не более чем на эту долю базы. Незачтенный остаток переносится на следующие годы. Ограничение установлено налоговым законодательством и действует не бессрочно, поэтому срок его действия задается следующим полем." },
+    { k: "loss_limit_end", l: "Последний календарный год ограничения убытков", t: "int",
+      h: "Ограничение применяется по указанный календарный год включительно. Измените год для проверки альтернативного режима." }
+  ]],
+  ["Опытная инфраструктура", [
+    { k: "pilot_share", l: "Стоимость опытной инфраструктуры, % инновационной части", t: "num", p: 1,
+      h: "Затраты на временную опытную инфраструктуру, на которой характеристики оборудования подтверждаются до строительства объекта. Учитываются в Базовом сценарии и в сценарии «Интеграция TRL7». После испытаний инфраструктура демонтируется, поэтому затраты безвозвратны." }
+  ]],
+  ["События доработки", [
+    { k: "p_ev", l: "Вероятности событий TRL5 … TRL9 при входе TRL6, %", t: "vec", p: 1,
+      h: "Вероятность доработки проектной и рабочей документации после подтверждения соответствующего уровня готовности. Пять значений. Для других точек входа вероятности пересчитываются по доле незафиксированных параметров, если не установлен флаг ниже." },
+    { k: "ev_cost", l: "Прямые затраты событий TRL5 … TRL9, млн руб.", t: "vec",
+      h: "Прямые затраты на одну доработку по каждому уровню, помимо стоимости повторной экспертизы. Пять значений." },
+    { k: "ev_delay_d", l: "Задержки событий TRL5 … TRL9, сут.", t: "vec",
+      h: "Задержка срока ввода объекта при наступлении доработки на соответствующем уровне. Пять значений в сутках." },
+    { k: "phi_s", l: "Доля незафиксированных параметров при входе TRL5, TRL6, TRL7, %", t: "vec", p: 1,
+      h: "Часть технических параметров оборудования, которая на момент входа в инвестиционный процесс еще не зафиксирована. Чем раньше вход, тем выше доля и тем больше вероятность доработки. Три значения." },
+    { k: "sigma", l: "Доля марок оборудования, зависящих от параметра, %", t: "num", p: 1,
+      h: "Часть позиций оборудования и смежных решений, на которые влияет изменение одного параметра. Определяет объем доработки документации." },
+    { k: "pir_share", l: "Проектные работы, % инвестиционной части", t: "num", p: 1,
+      h: "Стоимость проектных и изыскательских работ в долях инвестиционной части бюджета." },
+    { k: "pd_part", l: "Проектная документация, % стоимости проектных работ", t: "num", p: 1,
+      h: "Часть проектных работ, приходящаяся на проектную документацию. Остальное относится к рабочей документации." },
+    { k: "exp_share", l: "Повторная экспертиза, % стоимости проектной документации", t: "num", p: 1,
+      h: "Стоимость повторной экспертизы проектной документации в долях ее стоимости." },
+    { k: "exp_days", l: "Срок повторной экспертизы, сут.", t: "num",
+      h: "Длительность повторной экспертизы проектной документации. Добавляется к задержке ввода при доработке, затрагивающей проектную документацию." },
+    { k: "mfix", l: "Вероятности не зависят от точки входа", t: "bool",
+      h: "Если флаг установлен, вероятности событий берутся одинаковыми для всех точек входа. Если снят, они пересчитываются по доле незафиксированных параметров и дают раннему входу более высокий риск." }
+  ]],
+  ["Затраты ожидания при совмещении", [
+    { k: "t7_store", l: "Хранение и консервация, % инновационной части в год", t: "num", p: 1,
+      h: "Годовая ставка затрат ожидания. Применяется к двум окнам календарного плана. Первое окно — простой готового оборудования до начала монтажа. Второе окно — ожидание разработчика до подтверждения уровня готовности, если подтверждение привязано к стадии строительства и наступает позже планового окончания перехода. Если окна нет, затрат нет." },
+    { k: "t7_remount", l: "Демонтаж, перевозка, монтаж и верификация, % инновационной части", t: "num", p: 1,
+      h: "Разовые затраты на перенос оборудования с опытной инфраструктуры на объект и повторное подтверждение характеристик. Начисляются, если в календарном плане есть окно простоя оборудования до монтажа." },
+    { k: "t7_warr_p", l: "Вероятность окончания гарантии до ввода, %", t: "num", p: 1,
+      h: "Вероятность того, что гарантийный срок изготовителя закончится раньше ввода объекта в эксплуатацию." },
+    { k: "t7_warr_cost", l: "Продление гарантии или ремонт, % инновационной части", t: "num", p: 1,
+      h: "Затраты на продление гарантии или на ремонт, если гарантия закончилась до ввода объекта." }
+  ]]
+];
+
+/* Доли, сумма которых должна равняться 100 % */
+const SUM100 = { w_time: "доли времени переходов", w_tax: "доли инновационных затрат",
+                 stage_share: "доли времени стадий строительства",
+                 crit_w: "веса шести критериев" };
+
+let STATE = Object.assign({}, MODEL.DEFAULTS);
+let RES = null;
+let MCR = null, MCN = 5000, MCSEED = 20261107, MCSM = false, MCRND = false;
+
+const nf = (v, d) => (v === null || v === undefined || !isFinite(v)) ? "—" : v.toLocaleString("ru-RU", { minimumFractionDigits: d, maximumFractionDigits: d });
+const el = (t, a, c) => { const e = document.createElement(t); if (a) for (const k in a) { if (k === "class") e.className = a[k]; else if (k === "html") e.innerHTML = a[k]; else e.setAttribute(k, a[k]); } if (c !== undefined) e.textContent = c; return e; };
+
+/* ---------- форма входных данных ---------- */
+const num2s = v => {
+  const x = +(+v).toFixed(10);
+  return String(x).replace(".", ",");
+};
+const toShow = (f, v) => Array.isArray(v)
+  ? v.map(x => num2s(f.p ? x * 100 : x)).join("; ")
+  : num2s(f.p ? v * 100 : v);
+
+function helpIcon(f) {
+  const b = el("button", { class: "hq", type: "button", title: "Пояснение к параметру" }, "?");
+  b.onclick = ev => {
+    ev.preventDefault();
+    const old = document.querySelector(".hpop");
+    const same = old && old.dataset.key === f.k;
+    if (old) old.remove();
+    if (same) return;
+    const pop = el("div", { class: "hpop" });
+    pop.dataset.key = f.k;
+    pop.appendChild(el("b", null, f.l));
+    pop.appendChild(el("p", null, f.h || "Пояснение не задано."));
+    const cl = el("button", { class: "hcl", type: "button" }, "Закрыть");
+    cl.onclick = () => pop.remove();
+    pop.appendChild(cl);
+    b.parentNode.appendChild(pop);
+  };
+  return b;
+}
+
+function buildForm() {
+  const box = document.getElementById("form");
+  box.innerHTML = "";
+  FIELDS.forEach(([grp, items]) => {
+    box.appendChild(el("h3", null, grp));
+    items.forEach(f => {
+      const row = el("div", { class: "fr" });
+      const lb = el("label", null, f.l + " ");
+      lb.setAttribute("for", "f_" + f.k);
+      lb.appendChild(helpIcon(f));
+      let inp;
+      if (f.t === "bool") {
+        inp = el("input", { type: "checkbox", id: "f_" + f.k });
+        inp.checked = !!STATE[f.k];
+      } else {
+        inp = el("input", { type: "text", id: "f_" + f.k, inputmode: "decimal" });
+        inp.value = f.t === "bool" ? (STATE[f.k] ? "Да" : "Нет") : toShow(f, STATE[f.k]);
+      }
+      inp.dataset.key = f.k;
+      row.appendChild(lb); row.appendChild(inp);
+      box.appendChild(row);
+    });
+  });
+}
+
+const FMAP = {};
+FIELDS.forEach(([, items]) => items.forEach(f => FMAP[f.k] = f));
+
+function parseField(raw) {
+  const value = raw.trim().replace(",", ".");
+  return /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(value) ? Number(value) : NaN;
+}
+
+function readForm() {
+  const candidate = { ...STATE };
+  for (const input of document.querySelectorAll("#form input")) {
+    const f = FMAP[input.dataset.key];
+    if (f.t === "bool") { candidate[f.k] = input.checked; continue; }
+    const vector = f.t.startsWith("vec");
+    const numbers = (vector ? input.value.split(";") : [input.value]).map(parseField);
+    const values = numbers.map(x => f.p ? x / 100 : x);
+    candidate[f.k] = vector ? values : values[0];
+  }
+  return candidate;
+}
+
+function validateInputs(input) {
+  for (const [key, original] of Object.entries(DEFAULTS)) {
+    const value = input[key], f = FMAP[key], label = f ? f.l : key;
+    if (typeof original === "boolean") {
+      if (typeof value !== "boolean") throw Error(label + " — требуется логическое значение");
+      continue;
+    }
+    if (original === null && value === null) continue;
+    const vector = Array.isArray(original);
+    if (vector !== Array.isArray(value)) throw Error(label + " — неверный формат");
+    const numbers = vector ? value : [value];
+    if (!numbers.length || (vector && f?.t === "vec" && numbers.length !== original.length))
+      throw Error(label + " — проверьте число значений");
+    if (!numbers.every(x => Number.isFinite(x) && x >= 0))
+      throw Error(label + " — введите конечные неотрицательные числа");
+    if (f?.t === "int" && !Number.isSafeInteger(value)) throw Error(label + " — требуется целое число");
+    if ((f?.p && !["rate","markup","admin","pilot_share"].includes(key) || key === "ev6_p_abs") && numbers.some(x => x > 1))
+      throw Error(label + " — максимум 100 %");
+    if (SUM100[key] && Math.abs(numbers.reduce((a,b) => a+b,0)-100) > 1e-7)
+      throw Error(label + " — сумма должна равняться 100 %");
+  }
+  for (const k of ["budget","rate","t_dev","t_inv","n_years","op_years","amort_years","days","first_tax_year"]) {
+    if (!(input[k] > 0)) throw Error((FMAP[k]?.l || k) + " — требуется положительное значение");
+  }
+  if (!(input.share_inn > 0 && input.share_inn < 1)) throw Error("Доля инновационной части должна быть строго между 0 и 100 %");
+  if (!input.mfix && !input.phi_s[1]) throw Error("Для масштабирования вероятностей задайте ненулевую опорную долю TRL6");
+  if (input.w_time.some(x=>x===0) || input.stage_share.some(x=>x===0))
+    throw Error("Длительность каждого моделируемого этапа должна быть положительной");
+  if (input.n_years > 500) throw Error("Для интерактивного расчета поддерживается горизонт до 500 лет");
+  if (input.amort_years > input.op_years || input.load.length > input.op_years)
+    throw Error("Проверьте срок эксплуатации, амортизацию и число лет загрузки");
+  for (const k of ["q_evid","q_load"]) {
+    if (!input[k].every(x => Number.isFinite(x) && x >= 1 && x <= 5))
+      throw Error(FMAP[k].l + " — оценки задаются числами от 1 до 5");
+  }
+  for (const k of ["tr_years","kr_years"]) {
+    if (!input[k].every(n=>Number.isSafeInteger(n) && n>0)) throw Error("Годы ремонта должны быть положительными целыми числами");
+  }
+  const p = P(input);
+  for (const s of SC) {
+    const sch = schedule(s,p);
+    checkCalendar(s,sch);
+    let delay=0;
+    for (let k=5;k<=9;k++) {
+      if (event_scope(s,sch,k,p)[0]) delay += ev_params(p,s,k,sch)[2];
+    }
+    const required=year_of(sch.tv + delay/p.days) + p.op_years;
+    if (!Number.isFinite(required) || required>p.n_years)
+      throw Error(SCL[s] + " — для полной эксплуатации с учетом задержек требуется " + required + " лет");
+  }
+}
+
+function checkCalendar(s, sch) {
+  if (sch.f < -1e-9 || sch.trl_start.some((t,i)=>i>0 && t < sch.conf[i-1]-1e-9))
+    throw Error(SCL[s] + " — календарь невыполним. Проверьте сроки разработки и строительства");
+}
+
+function invalidate(message) {
+  RES=null; MCR=null;
+  document.getElementById("view").textContent="";
+  document.getElementById("exp").disabled=true;
+  const msg=document.getElementById("msg");
+  msg.textContent=message;
+  msg.className="err";
+}
+
+function compute() {
+  const candidate=readForm();
+  try { validateInputs(candidate); }
+  catch (error) { invalidate(error.message); return false; }
+  const msg=document.getElementById("msg");
+  const p=MODEL.P(candidate);
+  const R = { p: p, scn: {} };
+  SC.forEach(s => {
+    const sch = MODEL.schedule(s, p), rows = MODEL.flows(s, p);
+    R.scn[s] = { sch: sch, rows: rows, ind: MODEL.indicators(rows, p.rate) };
+  });
+  R.base = R.scn.BASE.ind.npv;
+  ["TRL7", "TRL6", "TRL5"].forEach(s => {
+    R.scn[s].adv = R.scn[s].ind.npv - R.base;
+    R.scn[s].out = MODEL.outcomes(s, p);
+  });
+  R.rates = [];
+  for (let i = 10; i <= 16; i++) {
+    const q = MODEL.P(Object.assign({}, candidate, { rate: i / 100 }));
+    const row = { rate: i / 100 };
+    SC.forEach(s => { const rr = MODEL.flows(s, q); row[s] = MODEL.npv(rr); });
+    R.rates.push(row);
+  }
+  R.pilot = [];
+  [0, 35, 70, 105, 140].forEach(cst => {
+    const q = MODEL.P(Object.assign({}, candidate, { pilot_share: cst / p.b_inn }));
+    const row = { cost: cst };
+    SC.forEach(s => { row[s] = MODEL.npv(MODEL.flows(s, q)); });
+    R.pilot.push(row);
+  });
+  R.shares = [];
+  [0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50].forEach(sh => {
+    const q = MODEL.P(Object.assign({}, candidate, { share_inn: sh }));
+    const row = { share: sh };
+    SC.forEach(s => { row[s] = MODEL.npv(MODEL.flows(s, q)); });
+    R.shares.push(row);
+  });
+  if (SC.some(s => !Number.isFinite(R.scn[s].ind.npv) || (s !== "BASE" && !Number.isFinite(R.scn[s].out.E_npv)))) {
+    invalidate("Расчет вышел за допустимый числовой диапазон"); return false;
+  }
+  STATE = candidate;
+  document.getElementById("exp").disabled=false;
+  RES = R;
+  MCR = null;
+  msg.textContent = "Расчет выполнен"; msg.className = "ok";
+  render();
+  return true;
+}
+
+/* ---------- графики (SVG) ---------- */
+function svgBox(w, h) {
+  const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  s.setAttribute("viewBox", "0 0 " + w + " " + h);
+  s.setAttribute("class", "chart"); s.setAttribute("role", "img");
+  return s;
+}
+function sv(tag, attrs, text) {
+  const e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+function barChart(data, title, unit) {
+  const W = 680, H = 300, L = 70, Rr = 20, T = 34, B = 56;
+  const s = svgBox(W, H);
+  s.appendChild(sv("text", { x: 0, y: 16, class: "ct" }, title));
+  const vals = data.map(d => d.v);
+  const vmax = Math.max(0, ...vals), vmin = Math.min(0, ...vals);
+  const pad = (vmax - vmin) * 0.12 || 1;
+  const hi = vmax + pad, lo = vmin - (vmin < 0 ? pad : 0);
+  const y = v => T + (hi - v) / (hi - lo) * (H - T - B);
+  const bw = (W - L - Rr) / data.length;
+  for (let i = 0; i <= 4; i++) {
+    const v = lo + (hi - lo) * i / 4;
+    s.appendChild(sv("line", { x1: L, x2: W - Rr, y1: y(v), y2: y(v), class: "grid" }));
+    s.appendChild(sv("text", { x: L - 8, y: y(v) + 4, class: "ax", "text-anchor": "end" }, nf(v, 0)));
+  }
+  s.appendChild(sv("line", { x1: L, x2: W - Rr, y1: y(0), y2: y(0), class: "zero" }));
+  data.forEach((d, i) => {
+    const x = L + i * bw + bw * 0.18, w = bw * 0.64;
+    const y0 = y(0), y1 = y(d.v);
+    s.appendChild(sv("rect", { x: x, y: Math.min(y0, y1), width: w, height: Math.max(1, Math.abs(y1 - y0)), rx: 4, fill: d.c }));
+    s.appendChild(sv("text", { x: x + w / 2, y: (d.v >= 0 ? y1 - 7 : y1 + 15), class: "vl", "text-anchor": "middle" }, nf(d.v, 1)));
+    const words = d.k.split(" ");
+    words.forEach((wd, j) => s.appendChild(sv("text", { x: x + w / 2, y: H - B + 18 + j * 13, class: "ax", "text-anchor": "middle" }, wd)));
+  });
+  s.appendChild(sv("text", { x: 0, y: H - 6, class: "ax" }, unit));
+  return s;
+}
+/* график денежного потока по годам: затраты вниз, поступления вверх,
+   отдельно показаны инновационные и инвестиционные затраты */
+function flowChart(rows, title) {
+  const W = 680, H = 330, L = 74, Rr = 16, T = 30, B = 70;
+  const s = svgBox(W, H);
+  s.appendChild(sv("text", { x: 0, y: 14, class: "ct" }, title || ""));
+  const inn = rows.map(r => r.inn + r.pilot + r.rework + r.t7x);
+  const inv = rows.map(r => r.inv);
+  const op = rows.map(r => r.cf_op);
+  const cum = rows.map(r => r.cumd);
+  let hi = 0, lo = 0;
+  rows.forEach((r, i) => {
+    hi = Math.max(hi, op[i], cum[i]);
+    lo = Math.min(lo, -(inn[i] + inv[i]), cum[i]);
+  });
+  const pad = (hi - lo) * 0.1 || 1;
+  hi += pad; lo -= pad;
+  const y = v => T + (hi - v) / (hi - lo) * (H - T - B);
+  const bw = (W - L - Rr) / rows.length;
+  for (let i = 0; i <= 4; i++) {
+    const v = lo + (hi - lo) * i / 4;
+    s.appendChild(sv("line", { x1: L, x2: W - Rr, y1: y(v), y2: y(v), class: "grid" }));
+    s.appendChild(sv("text", { x: L - 8, y: y(v) + 4, class: "ax", "text-anchor": "end" }, nf(v, 0)));
+  }
+  s.appendChild(sv("line", { x1: L, x2: W - Rr, y1: y(0), y2: y(0), class: "zero" }));
+  rows.forEach((r, i) => {
+    const x = L + i * bw + bw * 0.14, w = Math.max(1.5, bw * 0.72);
+    if (op[i] > 0) s.appendChild(sv("rect", { x: x, y: y(op[i]), width: w, height: Math.max(1, y(0) - y(op[i])), fill: "#9fb8cf" }));
+    let base = 0;
+    if (inv[i] > 0) { s.appendChild(sv("rect", { x: x, y: y(0), width: w, height: Math.max(1, y(-inv[i]) - y(0)), fill: COL.TRL5 })); base = inv[i]; }
+    if (inn[i] > 0) s.appendChild(sv("rect", { x: x, y: y(-base), width: w, height: Math.max(1, y(-base - inn[i]) - y(-base)), fill: COL.TRL6 }));
+    if (i % Math.max(1, Math.round(rows.length / 12)) === 0)
+      s.appendChild(sv("text", { x: x + w / 2, y: H - B + 16, class: "ax", "text-anchor": "middle" }, String(r.year)));
+  });
+  const px = i => L + i * bw + bw * 0.5;
+  s.appendChild(sv("path", { d: cum.map((v, i) => (i ? "L" : "M") + px(i) + " " + y(v)).join(" "), class: "ln", stroke: "#003366", fill: "none", "stroke-width": 2 }));
+  s.appendChild(sv("text", { x: 0, y: H - 6, class: "ax" }, "млн руб., год расчетного периода"));
+  return s;
+}
+function lineChart(xs, series, title, xlab, ylab, xfmt, opts) {
+  opts = opts || {};
+  const W = 680, H = 320, L = 74, Rr = 16, T = 34, B = 62;
+  const s = svgBox(W, H);
+  s.appendChild(sv("text", { x: 0, y: 16, class: "ct" }, title));
+  let vmax = -1e30, vmin = 1e30;
+  series.forEach(se => se.v.forEach(v => { if (v > vmax) vmax = v; if (v < vmin) vmin = v; }));
+  if (vmin > 0) vmin = 0;
+  const pad = (vmax - vmin) * 0.1 || 1;
+  const hi = vmax + pad, lo = vmin - pad;
+  const px = i => L + (xs.length === 1 ? 0 : i / (xs.length - 1) * (W - L - Rr));
+  const py = v => T + (hi - v) / (hi - lo) * (H - T - B);
+  for (let i = 0; i <= 4; i++) {
+    const v = lo + (hi - lo) * i / 4;
+    s.appendChild(sv("line", { x1: L, x2: W - Rr, y1: py(v), y2: py(v), class: "grid" }));
+    s.appendChild(sv("text", { x: L - 8, y: py(v) + 4, class: "ax", "text-anchor": "end" }, nf(v, 0)));
+  }
+  if (lo < 0 && hi > 0) s.appendChild(sv("line", { x1: L, x2: W - Rr, y1: py(0), y2: py(0), class: "zero" }));
+  xs.forEach((x, i) => {
+    if (xs.length <= 12 || i % Math.ceil(xs.length / 10) === 0)
+      s.appendChild(sv("text", { x: px(i), y: H - B + 20, class: "ax", "text-anchor": "middle" }, xfmt(x)));
+  });
+  series.forEach(se => {
+    const d = se.v.map((v, i) => (i ? "L" : "M") + px(i).toFixed(1) + " " + py(v).toFixed(1)).join(" ");
+    s.appendChild(sv("path", { d: d, fill: "none", stroke: se.c, "stroke-width": 2, "stroke-linejoin": "round" }));
+    if (opts.dots !== false && xs.length <= 12)
+      se.v.forEach((v, i) => s.appendChild(sv("circle", { cx: px(i), cy: py(v), r: 3.4, fill: se.c, stroke: "#fff", "stroke-width": 1.4 })));
+    if (opts.labels !== false) {
+      const last = se.v.length - 1;
+      s.appendChild(sv("text", { x: px(last) - 4, y: py(se.v[last]) - 9, class: "vl", "text-anchor": "end", fill: se.c }, se.k));
+    }
+  });
+  s.appendChild(sv("text", { x: W / 2, y: H - 6, class: "ax", "text-anchor": "middle" }, xlab));
+  s.appendChild(sv("text", { x: 0, y: 13, class: "ax" }, ylab));
+  return s;
+}
+function legend(items) {
+  const d = el("div", { class: "lg" });
+  items.forEach(it => {
+    const i = el("span", { class: "lgi" });
+    const sw = el("span", { class: "sw" }); sw.style.background = it.c;
+    i.appendChild(sw); i.appendChild(el("span", null, it.k)); d.appendChild(i);
+  });
+  return d;
+}
+function table(head, rows, cls) {
+  const t = el("table", { class: cls || "" });
+  const th = el("thead"), tr = el("tr");
+  head.forEach(h => tr.appendChild(el("th", null, h)));
+  th.appendChild(tr); t.appendChild(th);
+  const tb = el("tbody");
+  rows.forEach(r => {
+    const x = el("tr");
+    r.forEach((c, i) => {
+      const td = el("td", { class: i ? "n" : "" });
+      if (c && c.html !== undefined) td.innerHTML = c.html; else td.textContent = c;
+      x.appendChild(td);
+    });
+    tb.appendChild(x);
+  });
+  t.appendChild(tb);
+  return t;
+}
+function card(title, node) {
+  const d = el("section", { class: "card" });
+  if (title) d.appendChild(el("h2", null, title));
+  if (node) d.appendChild(node);
+  return d;
+}
+
+/* ---------- вкладки ---------- */
+function render() {
+  if (!RES) return;
+  const act = document.querySelector(".tab.on");
+  const name = act ? act.dataset.t : "sum";
+  const box = document.getElementById("view");
+  box.innerHTML = "";
+  ({ sum: vSum, cal: vCal, flow: vFlow, sens: vSens, mc: vMC, ev: vEv, tax: vTax, pick: vPick, chk: vChk, rep: vRep })[name](box);
+}
+function vSum(box) {
+  const R = RES, p = R.p;
+  const rows = SC.map(s => {
+    const i = R.scn[s].ind;
+    return [SCL[s], nf(i.npv, 1), nf(i.pi, 3), nf(i.irr === null ? null : i.irr * 100, 2), nf(i.pp, 2), nf(i.dpp, 2),
+      nf(R.scn[s].sch.tv, 2), s === "BASE" ? "—" : nf(R.scn[s].adv, 1)];
+  });
+  box.appendChild(card("Показатели эффективности сценариев",
+    table(["Сценарий", "ЧДД, млн руб.", "ИД", "ВНД, %", "Срок окупаемости, лет", "Дисконтированный срок, лет", "Срок ввода, лет", "Преимущество к базовому, млн руб."], rows, "wide")));
+  const c1 = card("Чистый дисконтированный доход по сценариям",
+    barChart(SC.map(s => ({ k: SCL[s], v: R.scn[s].ind.npv, c: COL[s] })), "", "млн руб."));
+  box.appendChild(c1);
+  const xs = R.scn.BASE.rows.map(r => r.n);
+  box.appendChild(card("Накопленный дисконтированный поток",
+    lineChart(xs, SC.map(s => ({ k: SCL[s], c: COL[s], v: R.scn[s].rows.map(r => r.cumd) })),
+      "", "год расчетного периода", "млн руб.", x => String(x), { labels: false, dots: false })));
+  box.lastChild.appendChild(legend(SC.map(s => ({ k: SCL[s], c: COL[s] }))));
+  const d = [["Инновационная часть бюджета, млн руб.", nf(p.b_inn, 1)],
+    ["Инвестиционная часть бюджета, млн руб.", nf(p.b_inv, 1)],
+    ["Опытная инфраструктура, млн руб.", nf(p.pilot, 1)],
+    ["Операционные расходы, млн руб. в год", nf(p.opex, 2)],
+    ["Техническое обслуживание, млн руб. в год", nf(p.to, 2)],
+    ["Текущий ремонт, млн руб.", nf(p.tr, 2)],
+    ["Капитальный ремонт, млн руб.", nf(p.kr, 2)]];
+  box.appendChild(card("Производные величины", table(["Величина", "Значение"], d)));
+}
+/* ---------- диаграмма сроков ---------- */
+function ganttChart(items, maxT) {
+  const W = 680, H = 44 + items.length * 46, L = 134, Rr = 26, T = 20;
+  const s = svgBox(W, H);
+  const yb = H - 26;
+  const x = v => L + v / maxT * (W - L - Rr);
+  for (let i = 0; i <= 5; i++) {
+    const v = maxT * i / 5;
+    s.appendChild(sv("line", { x1: x(v), x2: x(v), y1: T - 8, y2: yb, class: "grid" }));
+    s.appendChild(sv("text", { x: x(v), y: yb + 15, class: "ax", "text-anchor": "middle" }, nf(v, 1)));
+  }
+  items.forEach((d, i) => {
+    const y = T + 12 + i * 46;
+    s.appendChild(sv("text", { x: 0, y: y + 4, class: "ax" }, d.k));
+    s.appendChild(sv("rect", { x: x(0), y: y - 9, width: Math.max(1, x(d.f) - x(0)), height: 18, rx: 3, fill: d.c, opacity: 0.22 }));
+    s.appendChild(sv("rect", { x: x(d.f), y: y - 9, width: Math.max(1, x(d.tv) - x(d.f)), height: 18, rx: 3, fill: d.c, opacity: 0.75 }));
+    s.appendChild(sv("line", { x1: x(d.dev), x2: x(d.dev), y1: y - 14, y2: y + 14, stroke: "#52514e", "stroke-width": 1.6 }));
+    s.appendChild(sv("text", { x: x(d.tv) + 5, y: y + 4, class: "vl", fill: d.c }, nf(d.tv, 2)));
+  });
+  s.appendChild(sv("text", { x: 0, y: H - 2, class: "ax" }, "лет от начала разработки"));
+  return s;
+}
+
+/* ---------- календарный план сценария: полосы разработки, строительства и опытной инфраструктуры ---------- */
+const CAL_ST = ["ИД", "ПД", "РД", "МТР", "СМР", "ПНР хх", "ПНР нагр.", "КО"];
+const CAL_SC = ["#3C4F66", "#0079C2", "#1B9E77", "#d9a21b", "#3C4F66", "#C4690E", "#c2453d", "#7a3fa0"];
+const CAL_TC = { 2: "#cfd8e3", 3: "#b7c4d6", 4: "#9fb0c8", 5: "#0079C2", 6: "#1B9E77",
+                 7: "#8E44AD", 8: "#C4690E", 9: "#c2453d" };
+const CAL_TTL = {
+  BASE: "1. Базовый: разработка TRL1–TRL9 на опытной инфраструктуре, затем строительство",
+  TRL7: "2. Интеграция TRL7: вход после подтверждения TRL7 на опытной инфраструктуре",
+  TRL6: "3. Интеграция TRL6: вход после подтверждения TRL6; TRL7 — к концу СМР",
+  TRL5: "4. Интеграция TRL5: вход после подтверждения TRL5; TRL6 — к концу РД, TRL7 — к концу СМР"
+};
+function calendarPanel(key, maxT) {
+  const sch = RES.scn[key].sch;
+  const has = (key === "BASE" || key === "TRL7");
+  const W = 760, L = 150, Rr = 26, T = 46, B = 26;
+  const rowH = 26, gap = 20;
+  const nrow = has ? 3 : 2;
+  const H = T + nrow * (rowH + gap) + B;
+  const s = svgBox(W, H);
+  const defs = sv("defs");
+  const pat = sv("pattern", { id: "hatch" + key, width: 6, height: 6,
+    patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" });
+  pat.appendChild(sv("rect", { width: 6, height: 6, fill: "#ffffff", "fill-opacity": 0.0 }));
+  pat.appendChild(sv("line", { x1: 0, y1: 0, x2: 0, y2: 6, stroke: "#8E44AD", "stroke-width": 2, "stroke-opacity": 0.45 }));
+  defs.appendChild(pat);
+  s.appendChild(defs);
+  s.appendChild(sv("text", { x: 0, y: 13, class: "ct" }, CAL_TTL[key]));
+  const x = t => L + t / maxT * (W - L - Rr);
+  for (let g = 0; g <= Math.floor(maxT); g++) {
+    s.appendChild(sv("line", { x1: x(g), x2: x(g), y1: T - 4, y2: H - B, class: "grid" }));
+    s.appendChild(sv("text", { x: x(g), y: H - B + 14, class: "ax", "text-anchor": "middle" }, String(g)));
+  }
+  const rows = has ? ["Разработка (TRL)", "Строительство", "Опытная инфраструктура"]
+                   : ["Разработка (TRL)", "Строительство"];
+  const yr = i => T + i * (rowH + gap);
+  rows.forEach((t, i) => {
+    s.appendChild(sv("text", { x: L - 8, y: yr(i) + rowH / 2 + 4, class: "ax", "text-anchor": "end" }, t));
+  });
+  /* разработка */
+  const yd = yr(0);
+  for (let j = 0; j < 8; j++) {
+    const a = sch.trl_start[j], b = sch.conf[j], k = j + 2;
+    s.appendChild(sv("rect", { x: x(a), y: yd, width: Math.max(1, x(b) - x(a)), height: rowH,
+      fill: CAL_TC[k], stroke: "#fff", "stroke-width": 1 }));
+    if (x(b) - x(a) > 20) {
+      s.appendChild(sv("text", { x: (x(a) + x(b)) / 2, y: yd + rowH / 2 + 4, class: "vl",
+        "text-anchor": "middle", fill: k >= 5 ? "#fff" : "#2b3440" }, "TRL" + k));
+    }
+    s.appendChild(sv("path", { d: "M" + x(b) + "," + (yd - 3) + " l4,4 l-4,4 l-4,-4 z", fill: "#222" }));
+  }
+  /* продолжение подтверждения уровня на стадиях строительства */
+  let ext = null;
+  if (key === "TRL7") ext = [7, sch.conf[5], sch.st[5], "подтверждение TRL7 продолжается: демонтаж и монтаж на объекте"];
+  if (key === "TRL6" || key === "TRL5") ext = [6, sch.conf[4], sch.st[4], "подтверждение TRL6 продолжается: изготовление и поставка оборудования"];
+  if (ext) {
+    const [k, a, b, note] = ext;
+    s.appendChild(sv("rect", { x: x(a), y: yd, width: Math.max(1, x(b) - x(a)), height: rowH,
+      fill: CAL_TC[k], "fill-opacity": 0.25, stroke: CAL_TC[k], "stroke-width": 1.4,
+      "stroke-dasharray": "5,3" }));
+    s.appendChild(sv("text", { x: x(a) + 3, y: yd + rowH + 13, class: "ax",
+      "font-style": "italic" }, note));
+  }
+  /* строительство */
+  const yc = yr(1);
+  for (let j = 0; j < 8; j++) {
+    const a = sch.st[j], b = sch.en[j];
+    s.appendChild(sv("rect", { x: x(a), y: yc, width: Math.max(1, x(b) - x(a)), height: rowH,
+      fill: CAL_SC[j], stroke: "#fff", "stroke-width": 1 }));
+    if (x(b) - x(a) > 24) {
+      s.appendChild(sv("text", { x: (x(a) + x(b)) / 2, y: yc + rowH / 2 + 4, class: "vl",
+        "text-anchor": "middle", fill: "#fff" }, CAL_ST[j]));
+    }
+  }
+  /* опытная инфраструктура */
+  if (has) {
+    const yp = yr(2);
+    const endT = key === "BASE" ? 3.0 : sch.conf[5];
+    [[sch.trl_start[4], sch.conf[4], "создание", "#e8d9b0"],
+     [sch.conf[4], endT, "испытания", "#d2b86a"]].forEach(([a, b, l, c]) => {
+      s.appendChild(sv("rect", { x: x(a), y: yp, width: Math.max(1, x(b) - x(a)), height: rowH,
+        fill: c, stroke: "#fff", "stroke-width": 1 }));
+      if (x(b) - x(a) > 36) {
+        s.appendChild(sv("text", { x: (x(a) + x(b)) / 2, y: yp + rowH / 2 + 4, class: "ax",
+          "text-anchor": "middle" }, l));
+      }
+    });
+  }
+  /* вход и ввод */
+  const ent = sch.st[1], tv = sch.tv;
+  s.appendChild(sv("line", { x1: x(ent), x2: x(ent), y1: T - 6, y2: H - B,
+    stroke: "#c2453d", "stroke-width": 1.4, "stroke-dasharray": "3,3" }));
+  s.appendChild(sv("text", { x: x(ent) - 4, y: T - 8, class: "ax", "text-anchor": "end",
+    fill: "#c2453d" }, "вход: начало ПД"));
+  s.appendChild(sv("line", { x1: x(tv), x2: x(tv), y1: T - 6, y2: H - B,
+    stroke: "#222", "stroke-width": 1.2, "stroke-dasharray": "5,3" }));
+  s.appendChild(sv("text", { x: x(tv) + 4, y: T - 8, class: "ax" }, "ввод " + nf(tv, 2)));
+  return s;
+}
+function vCal(box) {
+  const R = RES;
+  const tvB = R.scn.BASE.sch.tv;
+  const info = s => {
+    const sch = R.scn[s].sch;
+    const dev = sch.conf_plan[sch.conf_plan.length - 1];
+    return { sch: sch, dev: dev, ov: Math.max(0, dev - sch.f), bld: sch.tv - sch.f };
+  };
+  /* сводка по сценариям */
+  const rows = SC.map(s => {
+    const d = info(s);
+    return [SCL[s], nf(d.sch.tv, 2), s === "BASE" ? "—" : nf((tvB - d.sch.tv) / tvB * 100, 1),
+      nf(d.dev, 2), nf(d.sch.st[1], 2), nf(d.bld, 2), nf(d.bld / d.sch.tv * 100, 1),
+      nf(d.ov, 2), nf(d.ov / d.sch.tv * 100, 1)];
+  });
+  const c0 = card("Срок реализации и доли этапов по сценариям",
+    table(["Сценарий", "Срок реализации, лет", "Короче базового, %", "Срок разработки, лет",
+      "Начало проектной документации, лет", "Строительный процесс, лет", "Доля строительного процесса, %",
+      "Совмещение процессов, лет", "Доля совмещения, %"], rows, "wide"));
+  c0.appendChild(el("p", { class: "note" },
+    "Срок реализации отсчитывается от начала разработки инновационного продукта до ввода объекта в эксплуатацию. Совмещение — это часть срока, в которой разработка и строительный процесс идут одновременно."));
+  box.appendChild(c0);
+  /* диаграмма */
+  const maxT = Math.max(...SC.map(s => R.scn[s].sch.tv)) * 1.06;
+  const cg = card("Сроки реализации по сценариям",
+    ganttChart(SC.map(s => { const d = info(s);
+      return { k: SCL[s], f: d.sch.f, tv: d.sch.tv, dev: d.dev, c: COL[s] }; }), maxT));
+  const wcal = el("div");
+  SC.forEach(k => wcal.appendChild(calendarPanel(k, maxT)));
+  wcal.appendChild(el("p", { class: "note" },
+    "Верхняя полоса каждой панели — переходы между уровнями готовности технологии, ромб отмечает подтверждение уровня. Средняя полоса — стадии строительства: ИД — исходные данные, ПД — проектная документация, РД — рабочая документация, МТР — поставка материально-технических ресурсов, СМР — строительно-монтажные работы, ПНР хх — пусконаладочные работы без нагрузки, ПНР нагр. — под нагрузкой, КО — комплексное опробование. Нижняя полоса показывает опытную инфраструктуру там, где она создается. Штриховая область отмечает продолжение подтверждения уровня на стадиях строительства. Красная пунктирная линия — вход в проектирование, черная штриховая — ввод объекта. Время в годах от начала разработки."));
+  box.appendChild(card("Календарный план сценариев", wcal));
+  cg.appendChild(el("p", { class: "note" },
+    "Светлая часть полосы — время до входа в инвестиционный процесс, насыщенная часть — строительный процесс, вертикальный штрих — окончание разработки инновационного продукта."));
+  box.appendChild(cg);
+  /* по каждому сценарию */
+  SC.forEach(s => {
+    const d = info(s), sch = d.sch;
+    const sh = v => nf(v / sch.tv * 100, 1);
+    const r1 = MODEL.TRL_NAMES.map((t, j) =>
+      [t, nf(sch.trl_start[j], 2), nf(sch.conf[j], 2), nf(sch.d_trl[j], 2), sh(sch.d_trl[j])]);
+    const r2 = MODEL.STAGE_NAMES.map((t, j) =>
+      [t, nf(sch.st[j], 2), nf(sch.en[j], 2), nf(sch.d_st[j], 2), sh(sch.d_st[j])]);
+    const w = el("div");
+    w.appendChild(el("h4", null, "Переходы уровней готовности технологии"));
+    w.appendChild(table(["Переход", "Начало, лет", "Подтверждение, лет", "Длительность, лет",
+      "Доля срока реализации, %"], r1));
+    w.appendChild(el("h4", null, "Стадии строительства"));
+    w.appendChild(table(["Стадия", "Начало, лет", "Окончание, лет", "Длительность, лет",
+      "Доля срока реализации, %"], r2));
+    w.appendChild(el("p", { class: "note" }, "Начало проектной документации: " + nf(sch.st[1], 2) +
+      " лет. Ввод в эксплуатацию: " + nf(sch.tv, 2) + " лет. Срок разработки: " + nf(d.dev, 2) +
+      " лет. Совмещение: " + nf(d.ov, 2) + " лет, или " + sh(d.ov) + " % срока реализации."));
+    box.appendChild(card(SCL[s], w));
+  });
+}
+
+function vFlow(box) {
+  const R = RES;
+  const sel = el("select", { id: "fsel" });
+  SC.forEach(s => { const o = el("option", { value: s }, SCL[s]); sel.appendChild(o); });
+  sel.value = window._fs || "TRL6";
+  sel.onchange = () => { window._fs = sel.value; render(); };
+  const head = ["Год", "Инновационная часть", "Опытная инфраструктура", "Инвестиционная часть", "Доработки",
+    "Затраты ожидания", "Капитальные затраты", "Выручка", "Операционные расходы", "Обслуживание и ремонт",
+    "Амортизация", "Признание НИОКР", "EBITDA", "Налоговая база", "Налог", "Поток", "Дисконтированный поток", "Накопленный дисконтированный"];
+  const rows = R.scn[sel.value].rows.map(r => [r.year, nf(r.inn, 2), nf(r.pilot, 2), nf(r.inv, 2), nf(r.rework, 2),
+    nf(r.t7x, 2), nf(r.capex, 2), nf(r.rev, 2), nf(r.opex, 2), nf(r.toir, 2), nf(r.am, 2), nf(r.rnd, 2),
+    nf(r.ebitda, 2), nf(r.base, 2), nf(r.tax, 2), nf(r.cf, 2), nf(r.pv, 2), nf(r.cumd, 2)]
+    .map((v, i) => {
+      if (i === 11 && r.rnd > 0) return { html: "<span class='rec'>" + v + "</span>" };
+      if (i === 1 || i === 2 || i === 4 || i === 5) return { html: "<span class='cinn'>" + v + "</span>" };
+      if (i === 3) return { html: "<span class='cinv'>" + v + "</span>" };
+      return v;
+    }));
+  const w = el("div");
+  const bar = el("div", { class: "bar" });
+  bar.appendChild(el("label", { for: "fsel" }, "Сценарий"));
+  bar.appendChild(sel);
+  const b = el("button", { class: "sm" }, "Выгрузить таблицу в CSV");
+  b.onclick = () => csv(head, rows, "Годовые потоки " + SCL[sel.value]);
+  bar.appendChild(b);
+  w.appendChild(bar);
+
+  const g = el("div");
+  const rr = R.scn[sel.value].rows;
+  g.appendChild(flowChart(rr, ""));
+  g.appendChild(legend([{ k: "Инновационные затраты", c: COL.TRL6 },
+                        { k: "Инвестиционные затраты", c: COL.TRL5 },
+                        { k: "Поступления от эксплуатации", c: "#9fb8cf" },
+                        { k: "Накопленный дисконтированный поток", c: "#003366" }]));
+  g.appendChild(el("p", { class: "note" },
+    "Столбцы вниз показывают затраты года, причем инновационные затраты включают опытную инфраструктуру, "
+    + "затраты на доработки и затраты на хранение и повторную верификацию оборудования. Столбцы вверх "
+    + "показывают поступления от эксплуатации за вычетом налога. Линия показывает накопленный "
+    + "дисконтированный поток."));
+  box.appendChild(card("Денежный поток по годам, " + SCL[sel.value], g));
+
+  const sc = el("div", { class: "scroll" }); sc.appendChild(table(head, rows, "num")); w.appendChild(sc);
+  w.appendChild(el("p", { class: "note" },
+    "Столбцы инновационной и инвестиционной части выделены цветом. Зеленым отмечены годы, в которых расходы на научные исследования и опытно-конструкторские разработки признаются в налоговой базе. Признание отнесено на год завершения этапа, расход распределен по годам отдельно в столбце инновационной части."));
+  box.appendChild(card("Годовые потоки, млн руб.", w));
+}
+function vSens(box) {
+  const R = RES;
+  box.appendChild(card("Чувствительность к ставке дисконтирования",
+    lineChart(R.rates.map(r => r.rate), SC.map(s => ({ k: SCL[s], c: COL[s], v: R.rates.map(r => r[s]) })),
+      "", "ставка дисконтирования, %", "ЧДД, млн руб.", x => nf(x * 100, 0), { labels: false })));
+  box.lastChild.appendChild(legend(SC.map(s => ({ k: SCL[s], c: COL[s] }))));
+  box.lastChild.appendChild(table(["Ставка, %"].concat(SC.map(s => SCL[s])),
+    R.rates.map(r => [nf(r.rate * 100, 0)].concat(SC.map(s => nf(r[s], 1))))));
+  box.appendChild(card("Чувствительность к стоимости опытной инфраструктуры",
+    lineChart(R.pilot.map(r => r.cost), SC.map(s => ({ k: SCL[s], c: COL[s], v: R.pilot.map(r => r[s]) })),
+      "", "стоимость опытной инфраструктуры, млн руб.", "ЧДД, млн руб.", x => nf(x, 0), { labels: false })));
+  box.lastChild.appendChild(legend(SC.map(s => ({ k: SCL[s], c: COL[s] }))));
+  box.lastChild.appendChild(table(["Стоимость, млн руб."].concat(SC.map(s => SCL[s])).concat(["Преимущество TRL6", "Преимущество TRL5"]),
+    R.pilot.map(r => [nf(r.cost, 0)].concat(SC.map(s => nf(r[s], 1))).concat([nf(r.TRL6 - r.BASE, 1), nf(r.TRL5 - r.BASE, 1)]))));
+  box.appendChild(card("Чувствительность к доле инновационной части",
+    lineChart(R.shares.map(r => r.share), SC.map(s => ({ k: SCL[s], c: COL[s], v: R.shares.map(r => r[s]) })),
+      "", "доля инновационной части, %", "ЧДД, млн руб.", x => nf(x * 100, 0), { labels: false })));
+  box.lastChild.appendChild(legend(SC.map(s => ({ k: SCL[s], c: COL[s] }))));
+  box.lastChild.appendChild(table(["Доля, %"].concat(SC.map(s => SCL[s])),
+    R.shares.map(r => [nf(r.share * 100, 0)].concat(SC.map(s => nf(r[s], 1))))));
+}
+/* ---------- анализ риска: преимущество, ожидаемые потери и их структура ---------- */
+function riskAdvChart(R) {
+  const KS = ["TRL7", "TRL6", "TRL5"];
+  const W = 680, H = 320, L = 74, Rr = 20, T = 34, B = 58;
+  const s = svgBox(W, H);
+  s.appendChild(sv("text", { x: 0, y: 16, class: "ct" },
+    "Преимущество над базовым сценарием и ожидаемые потери от доработок"));
+  const adv = {}, los = {};
+  KS.forEach(k => { adv[k] = R.scn[k].adv; los[k] = R.scn[k].out.E_loss; });
+  const hi = Math.max.apply(null, KS.map(k => adv[k])) * 1.2 || 1;
+  const y = v => T + (hi - v) / hi * (H - T - B);
+  for (let i = 0; i <= 4; i++) {
+    const v = hi * i / 4;
+    s.appendChild(sv("line", { x1: L, x2: W - Rr, y1: y(v), y2: y(v), class: "grid" }));
+    s.appendChild(sv("text", { x: L - 8, y: y(v) + 4, class: "ax", "text-anchor": "end" }, nf(v, 0)));
+  }
+  const bw = (W - L - Rr) / KS.length;
+  KS.forEach((k, i) => {
+    const x = L + i * bw + bw * 0.3, w = bw * 0.4;
+    const rem = adv[k] - los[k];
+    s.appendChild(sv("rect", { x: x, y: y(rem), width: w, height: Math.max(1, y(0) - y(rem)),
+      rx: 4, fill: COL[k] }));
+    s.appendChild(sv("rect", { x: x, y: y(adv[k]), width: w,
+      height: Math.max(1, y(rem) - y(adv[k])), fill: "#C4690E" }));
+    s.appendChild(sv("text", { x: x + w / 2, y: y(adv[k]) - 20, class: "vl",
+      "text-anchor": "middle", fill: COL[k] }, nf(adv[k], 1)));
+    s.appendChild(sv("text", { x: x + w / 2, y: y(adv[k]) - 7, class: "ax",
+      "text-anchor": "middle", fill: "#C4690E" }, "потери " + nf(los[k], 2)));
+    s.appendChild(sv("text", { x: x + w / 2, y: y(rem) + 16, class: "vl",
+      "text-anchor": "middle", fill: "#fff" }, nf(rem, 1)));
+    s.appendChild(sv("text", { x: x + w / 2, y: H - B + 18, class: "ax",
+      "text-anchor": "middle" }, SCL[k]));
+  });
+  s.appendChild(sv("text", { x: 0, y: H - 6, class: "ax" }, "млн руб."));
+  return s;
+}
+function riskContribChart(R) {
+  const KS = ["TRL7", "TRL6", "TRL5"];
+  const W = 680, H = 300, L = 74, Rr = 20, T = 34, B = 58;
+  const s = svgBox(W, H);
+  s.appendChild(sv("text", { x: 0, y: 16, class: "ct" },
+    "Структура ожидаемых потерь по событиям доработки"));
+  const data = {};
+  let hi = 0;
+  KS.forEach(k => {
+    const o = R.scn[k].out, ev = o.events.filter(e => e.aff);
+    const idx = o.events.filter(e => e.aff).map(e => e.k);
+    const sing = {};
+    o.items.forEach(it => {
+      const n = it.combo.reduce((a, b) => a + b, 0);
+      if (n === 1) sing[idx[it.combo.indexOf(1)]] = it.loss;
+    });
+    data[k] = idx.map((kk, i) => {
+      const v = ev[i].p * (sing[kk] || 0);
+      if (v > hi) hi = v;
+      return { k: kk, v: v };
+    });
+  });
+  hi = hi * 1.35 || 1;
+  const y = v => T + (hi - v) / hi * (H - T - B);
+  for (let i = 0; i <= 4; i++) {
+    const v = hi * i / 4;
+    s.appendChild(sv("line", { x1: L, x2: W - Rr, y1: y(v), y2: y(v), class: "grid" }));
+    s.appendChild(sv("text", { x: L - 8, y: y(v) + 4, class: "ax", "text-anchor": "end" }, nf(v, 1)));
+  }
+  const bw = (W - L - Rr) / KS.length;
+  KS.forEach((k, i) => {
+    const g = data[k], n = g.length, w = Math.min(34, (bw * 0.7) / n);
+    const x0 = L + i * bw + (bw - n * w) / 2;
+    g.forEach((d, j) => {
+      const x = x0 + j * w;
+      s.appendChild(sv("rect", { x: x + 2, y: y(d.v), width: w - 4,
+        height: Math.max(1, y(0) - y(d.v)), rx: 3, fill: "#C4690E",
+        "fill-opacity": (0.45 + 0.16 * j).toFixed(2) }));
+      s.appendChild(sv("text", { x: x + w / 2, y: y(d.v) - 6, class: "ax",
+        "text-anchor": "middle" }, "TRL" + d.k));
+    });
+    s.appendChild(sv("text", { x: L + i * bw + bw / 2, y: H - B + 18, class: "ax",
+      "text-anchor": "middle" }, SCL[k]));
+    s.appendChild(sv("text", { x: L + i * bw + bw / 2, y: T + 10, class: "vl",
+      "text-anchor": "middle", fill: COL[k] }, "всего " + nf(R.scn[k].out.E_loss, 2)));
+  });
+  s.appendChild(sv("text", { x: 0, y: H - 6, class: "ax" }, "млн руб."));
+  return s;
+}
+function vEv(box) {
+  const R = RES;
+  const rc = card("Анализ риска доработок");
+  rc.appendChild(riskAdvChart(R));
+  rc.appendChild(el("p", { class: "note" },
+    "Высота столбца равна преимуществу сценария над базовым без событий доработки. Оранжевая часть показывает ожидаемые потери, то есть сумму произведений вероятности каждого исхода на потерю дохода в нем. Число внутри столбца равно преимуществу с учетом ожидаемых потерь."));
+  rc.appendChild(riskContribChart(R));
+  rc.appendChild(el("p", { class: "note" },
+    "Вклад события равен произведению его вероятности на потерю дохода при одиночном наступлении этого события. Сумма вкладов совпадает с ожидаемой потерей по полному перебору с точностью до исходов, где события наступают совместно."));
+  box.appendChild(rc);
+  ["TRL5", "TRL6", "TRL7"].forEach(s => {
+    const o = R.scn[s].out;
+    const w = el("div");
+    w.appendChild(table(["Событие", "Затронутые работы", "Вероятность", "Прямые затраты, млн руб.", "Задержка, сут."],
+      o.events.map(e => ["Доработка на уровне TRL" + e.k, e.aff ? e.desc : "—", nf(e.p, 3), nf(e.cost, 2), nf(e.dd, 0)])));
+    const items = o.items.slice().sort((a, b) => b.prob - a.prob);
+    w.appendChild(el("h4", null, "Исходы"));
+    w.appendChild(table(["Состав событий", "Вероятность", "Затраты, млн руб.", "Задержка, сут.", "ЧДД, млн руб.", "Потеря ЧДД, млн руб."],
+      items.map(i => [i.names.length ? i.names.join(", ") : "без событий", nf(i.prob, 4), nf(i.cost, 2), nf(i.delay, 0), nf(i.npv, 1), nf(i.loss, 1)])));
+    w.appendChild(el("p", { class: "note" }, "ЧДД без событий: " + nf(o.npv0, 1) +
+      " млн руб. Ожидаемый ЧДД: " + nf(o.E_npv, 1) + " млн руб. Ожидаемая потеря: " + nf(o.E_loss, 2) +
+      " млн руб. Наихудший исход: " + nf(Math.min.apply(null, o.items.map(i => i.npv)), 1) + " млн руб."));
+    box.appendChild(card(SCL[s], w));
+  });
+}
+function decision(R) {
+  const rows = INTEG.map(key => {
+    const outcome = R.scn[key].out;
+    const expected = outcome.E_npv;
+    const stress = Math.min(...outcome.items.map(x => x.npv));
+    const reserve = stress - R.base;
+    const reason = expected <= 0 ? "Ожидаемый ЧДД ≤ 0" : reserve <= 0 ? "Стресс-запас ≤ 0" : "Допущен";
+    return {key, expected, stress, reserve, reason};
+  });
+  const metric = R.p.prefer_reserve ? "reserve" : "expected";
+  const eligible = rows.filter(r => r.reason === "Допущен").sort((a,b) =>
+    b[metric]-a[metric] || R.scn[a.key].sch.tv-R.scn[b.key].sch.tv);
+  if (R.p.use_crit) {
+    const opts = criteriaTable(R, rows);
+    const best = opts.slice().sort((a,b) => b.total-a.total || a.tv-b.tv)[0];
+    return {rows, opts, criterion: "Максимум шестикритериальной оценки",
+            result: best ? best.label : "Экономически допустимый сценарий не найден"};
+  }
+  const criterion = R.p.prefer_reserve ? "Максимум стресс-запаса" : "Максимум ожидаемого ЧДД";
+  const result = eligible.length ? SCL[eligible[0].key] : R.base > 0 ? "Базовый сценарий" : "Экономически допустимый сценарий не найден";
+  return {rows, criterion, result};
+}
+/* Шестикритериальная оценка раздела 3.3. В оценке участвуют базовый вариант
+   и допущенные сценарии интеграции. Запас устойчивости базового варианта принят
+   наибольшим среди вариантов, поскольку доработок в нем нет. */
+function criteriaTable(R, rows) {
+  const w = R.p.crit_w.map(x => x/100);
+  const ok = rows.filter(r => r.reason === "Допущен");
+  const ms = {};
+  INTEG.forEach(k => { ms[k] = MODEL.criticalM(k, R.p, R.base, R.scn[k].sch); });
+  const vals = INTEG.map(k => ms[k]).filter(x => x !== null && Number.isFinite(x));
+  const mmax = vals.length ? Math.max(...vals) : 1.0;
+  const idx = { BASE: 0, TRL7: 1, TRL6: 2, TRL5: 3 };
+  const opts = [{ key: "BASE", label: SCL.BASE, npv: R.base, tv: R.scn.BASE.sch.tv, worst: 0.0, m: mmax,
+                  qe: R.p.q_evid[0], qr: R.p.q_load[0] }];
+  ok.forEach(r => opts.push({ key: r.key, label: SCL[r.key], npv: R.scn[r.key].ind.npv,
+    tv: R.scn[r.key].sch.tv, worst: r.reserve,
+    m: (ms[r.key] === null || !Number.isFinite(ms[r.key])) ? mmax : ms[r.key],
+    qe: R.p.q_evid[idx[r.key]], qr: R.p.q_load[idx[r.key]] }));
+  return MODEL.scoreOptions(opts, w);
+}
+function vPick(box) {
+  const d=decision(RES), w=el("div");
+  w.appendChild(el("p",{class:"concl"}, d.criterion + ". Результат выбора — " + d.result + "."));
+  w.appendChild(table(["Вариант","Ввод, лет","Ожидаемый ЧДД","Стресс-ЧДД","Запас к базе","Допуск"],
+    d.rows.map(r=>[SCL[r.key],nf(RES.scn[r.key].sch.tv,2),nf(r.expected,2),nf(r.stress,2),nf(r.reserve,2),r.reason]),"wide"));
+  w.appendChild(el("p",{class:"note"},"Суммы в млн руб. Допуск требует положительного ожидаемого ЧДД и положительного запаса к базе во всех сочетаниях доработок. Стресс включает даже события с заданной нулевой вероятностью. При равенстве критерия предпочтителен более ранний ввод."));
+  box.appendChild(card("Выбор сценария",w));
+  if (d.opts) box.appendChild(card("Шестикритериальная оценка", critCard(d)));
+}
+/* Карточка шестикритериальной оценки: исходные величины, баллы и взвешенный итог. */
+function critCard(d) {
+  const w = el("div");
+  const names = MODEL.CRIT_NAMES;
+  const wts = RES.p.crit_w;
+  w.appendChild(table(["Вариант","ЧДД, млн руб.","Ввод, лет","Остаток, млн руб.","Доказательность","Нагрузка","Запас m*"],
+    d.opts.map(o=>[o.label,nf(o.npv,1),nf(o.tv,2),nf(o.worst,1),nf(o.qe,0),nf(o.qr,0),nf(o.m,3)]),"wide"));
+  w.appendChild(el("p",{class:"note"},"Исходные величины оценки. Остаток базового варианта принят равным нулю, запас устойчивости базового варианта принят наибольшим среди вариантов, поскольку доработок в нем нет."));
+  w.appendChild(table(["Вариант"].concat(names.map((n,i)=>n+", вес "+nf(wts[i],0)+" %")).concat(["Оценка S"]),
+    d.opts.map(o=>[o.label].concat(o.score.map(x=>nf(x,1))).concat([nf(o.total,2)])),"wide"));
+  w.appendChild(el("p",{class:"note"},"Количественные критерии нормированы линейно по наилучшему и наихудшему значению среди вариантов, для срока ввода нормировка обращена. Экспертные оценки переведены в баллы по формуле, в которой из оценки вычитается единица и результат делится на четыре. Оценка S является взвешенной суммой баллов."));
+  return w;
+}
+/* ---------- налоговые расчеты: сравнение порядков признания инновационных затрат ---------- */
+function taxData() {
+  const R = RES, p = R.p, out = {};
+  SC.forEach(s => {
+    const sch = MODEL.schedule(s, p);
+    const a = MODEL.flows(s, p, 0, [], sch);
+    const b = MODEL.flows(s, p, 0, [], sch, "amort");
+    const sum = (rows, f) => rows.reduce((x, r) => x + f(r), 0);
+    out[s] = {
+      a: a, b: b, tv: sch.tv,
+      npvA: MODEL.npv(a), npvB: MODEL.npv(b),
+      ebitdaA: sum(a, r => r.ebitda * r.df),
+      capexA: sum(a, r => r.capex * r.df),
+      taxA: sum(a, r => r.tax), taxB: sum(b, r => r.tax),
+      pvA: sum(a, r => r.tax * r.df), pvB: sum(b, r => r.tax * r.df),
+      y1A: (a.find(r => r.tax > 0.01) || {}).year,
+      y1B: (b.find(r => r.tax > 0.01) || {}).year
+    };
+  });
+  return out;
+}
+function taxBars(T) {
+  const W = 680, H = 300, L = 74, Rr = 20, Tp = 34, B = 58;
+  const s = svgBox(W, H);
+  s.appendChild(sv("text", { x: 0, y: 16, class: "ct" },
+    "Чистый дисконтированный доход при двух порядках налогового признания"));
+  let hi = 0;
+  SC.forEach(k => { hi = Math.max(hi, T[k].npvA, T[k].npvB); });
+  hi *= 1.25;
+  const y = v => Tp + (hi - v) / hi * (H - Tp - B);
+  for (let i = 0; i <= 4; i++) {
+    const v = hi * i / 4;
+    s.appendChild(sv("line", { x1: L, x2: W - Rr, y1: y(v), y2: y(v), class: "grid" }));
+    s.appendChild(sv("text", { x: L - 8, y: y(v) + 4, class: "ax", "text-anchor": "end" }, nf(v, 0)));
+  }
+  const bw = (W - L - Rr) / SC.length;
+  SC.forEach((k, i) => {
+    const x = L + i * bw + bw * 0.18, w = bw * 0.28;
+    s.appendChild(sv("rect", { x: x, y: y(T[k].npvA), width: w,
+      height: Math.max(1, y(0) - y(T[k].npvA)), rx: 4, fill: COL[k] }));
+    s.appendChild(sv("rect", { x: x + w + 6, y: y(T[k].npvB), width: w,
+      height: Math.max(1, y(0) - y(T[k].npvB)), rx: 4, fill: COL[k], "fill-opacity": 0.45 }));
+    s.appendChild(sv("text", { x: x + w / 2, y: y(T[k].npvA) - 6, class: "vl",
+      "text-anchor": "middle", fill: COL[k] }, nf(T[k].npvA, 1)));
+    s.appendChild(sv("text", { x: x + w + 6 + w / 2, y: y(T[k].npvB) - 6, class: "ax",
+      "text-anchor": "middle" }, nf(T[k].npvB, 1)));
+    s.appendChild(sv("text", { x: L + i * bw + bw / 2, y: H - B + 18, class: "ax",
+      "text-anchor": "middle" }, SCL[k]));
+  });
+  s.appendChild(sv("text", { x: 0, y: H - 6, class: "ax" },
+    "млн руб. Левый столбец — поэтапное признание, правый (светлый) — признание через амортизацию"));
+  return s;
+}
+function taxYears(T, key) {
+  const W = 680, H = 300, L = 74, Rr = 20, Tp = 34, B = 58;
+  const s = svgBox(W, H);
+  s.appendChild(sv("text", { x: 0, y: 16, class: "ct" },
+    "Налог на прибыль по годам, сценарий «" + SCL[key] + "»"));
+  const a = T[key].a, b = T[key].b;
+  let hi = 0;
+  a.forEach(r => hi = Math.max(hi, r.tax));
+  b.forEach(r => hi = Math.max(hi, r.tax));
+  hi = hi * 1.2 || 1;
+  const n0 = a[0].year, n1 = a[a.length - 1].year;
+  const x = yr => L + (yr - n0) / (n1 - n0) * (W - L - Rr);
+  const y = v => Tp + (hi - v) / hi * (H - Tp - B);
+  for (let i = 0; i <= 4; i++) {
+    const v = hi * i / 4;
+    s.appendChild(sv("line", { x1: L, x2: W - Rr, y1: y(v), y2: y(v), class: "grid" }));
+    s.appendChild(sv("text", { x: L - 8, y: y(v) + 4, class: "ax", "text-anchor": "end" }, nf(v, 0)));
+  }
+  const line = (rows, col, dash) => {
+    const d = rows.map((r, i) => (i ? "L" : "M") + x(r.year) + "," + y(r.tax)).join(" ");
+    const e = sv("path", { d: d, fill: "none", stroke: col, "stroke-width": 2 });
+    if (dash) e.setAttribute("stroke-dasharray", "5,3");
+    s.appendChild(e);
+  };
+  line(a, COL[key], false);
+  line(b, "#C4690E", true);
+  for (let yr = n0; yr <= n1; yr += 5) {
+    s.appendChild(sv("text", { x: x(yr), y: H - B + 18, class: "ax", "text-anchor": "middle" }, String(yr)));
+  }
+  s.appendChild(sv("text", { x: 0, y: H - 6, class: "ax" },
+    "млн руб. Сплошная линия — поэтапное признание, штриховая — признание через амортизацию"));
+  return s;
+}
+function vTax(box) {
+  const T = taxData();
+  const w = el("div");
+
+  const r1 = SC.map(k => [SCL[k], nf(T[k].ebitdaA, 1), nf(T[k].pvA, 1), nf(T[k].capexA, 1),
+    nf(T[k].npvA, 1), nf(T[k].tv, 2)]);
+  w.appendChild(el("h4", {}, "Разложение чистого дисконтированного дохода по сценариям"));
+  w.appendChild(table(["Сценарий", "Приведенная прибыль до налога", "Приведенный налог",
+    "Приведенные капитальные вложения", "ЧДД", "Срок ввода, лет"], r1, "wide"));
+  w.appendChild(el("p", { class: "note" },
+    "ЧДД равен приведенной прибыли до налога за вычетом приведенного налога и приведенных капитальных вложений. Приведенный налог в сценариях интеграции выше, потому что объект вводится раньше и прибыль облагается налогом раньше. Между сценариями приведенный налог сравнивать нельзя, он следует за прибылью, а не характеризует качество сценария. Суммы в млн руб."));
+
+  const r2 = SC.map(k => [SCL[k], nf(T[k].npvA, 1), nf(T[k].npvB, 1), nf(T[k].npvB - T[k].npvA, 1),
+    nf(T[k].pvA, 1), nf(T[k].pvB, 1), nf(T[k].pvB - T[k].pvA, 1), nf(T[k].taxA, 1),
+    String(T[k].y1A) + " / " + String(T[k].y1B)]);
+  w.appendChild(el("h4", {}, "Сравнение двух порядков налогового признания инновационных затрат"));
+  w.appendChild(table(["Сценарий", "ЧДД, поэтапно", "ЧДД, амортизация", "Изменение ЧДД",
+    "Приведенный налог, поэтапно", "Приведенный налог, амортизация", "Изменение приведенного налога",
+    "Налог за горизонт", "Первый год налога, поэтапно / амортизация"], r2, "wide"));
+  w.appendChild(el("p", { class: "note" },
+    "Поэтапное признание означает, что затраты на разработку уменьшают налоговую базу в году подтверждения уровня готовности пропорционально доле затрат этапа. Признание через амортизацию означает, что те же затраты включаются в стоимость объекта и списываются линейно после ввода в эксплуатацию. Сравнение приведенного налога корректно только внутри одного сценария, где выручка, сроки и капитальные вложения не меняются."));
+
+  w.appendChild(taxBars(T));
+  const sel = el("select", { class: "sel" });
+  SC.forEach(k => { sel.appendChild(el("option", { value: k }, SCL[k])); });
+  sel.value = "TRL5";
+  const holder = el("div");
+  const draw = () => { holder.innerHTML = ""; holder.appendChild(taxYears(T, sel.value)); };
+  sel.addEventListener("change", draw);
+  const bar = el("div", { class: "row" });
+  bar.appendChild(el("label", {}, "Сценарий для графика по годам: "));
+  bar.appendChild(sel);
+  w.appendChild(bar);
+  w.appendChild(holder);
+  draw();
+
+  w.appendChild(el("p", { class: "concl" },
+    "Номинальная сумма налога за горизонт расчета одинакова во всех сценариях и при обоих порядках признания, поэтому интеграция налоговой экономии не создает. Внутри одного сценария изменение ЧДД в точности равно изменению приведенного налога, то есть поздний вычет переносит налог ближе к началу эксплуатации и снижает доход. Между сценариями приведенный налог растет вместе с прибылью от более раннего ввода объекта, и прирост приведенной прибыли до налога превышает прирост налога, поэтому ЧДД растет."));
+  box.appendChild(card("Налоговые расчеты", w));
+}
+function vChk(box) {
+  const R = RES, p = R.p;
+  const ok = v => ({ html: "<b class='y'>выполнено</b>" });
+  const no = v => ({ html: "<b class='n'>нарушено</b>" });
+  const mark = c => c ? ok() : no();
+  let bad = 0;
+  const add = (rows, name, cond, fact) => { if (!cond) bad++; rows.push([name, fact, mark(cond)]); };
+
+  /* 1. введенные данные */
+  const r1 = [];
+  Object.keys(SUM100).forEach(k => {
+    const a = STATE[k], s = a.reduce((x, y) => x + y, 0);
+    add(r1, "Сумма поля «" + FMAP[k].l + "» равна 100 %", Math.abs(s - 100) <= 0.01, num2s(s) + " %");
+  });
+  add(r1, "Оценки доказательности и нагрузки в пределах от 1 до 5",
+    STATE.q_evid.concat(STATE.q_load).every(x => x >= 1 && x <= 5),
+    STATE.q_evid.join("; ") + " и " + STATE.q_load.join("; "));
+  add(r1, "Доля инновационной части в пределах от 0 до 100 %",
+    p.share_inn > 0 && p.share_inn < 1, num2s(p.share_inn * 100) + " %");
+  add(r1, "Ставка дисконтирования положительна", p.rate > 0, num2s(p.rate * 100) + " % годовых");
+  add(r1, "Предел зачета убытка в пределах от 0 до 100 %",
+    p.loss_limit >= 0 && p.loss_limit <= 1, num2s(p.loss_limit * 100) + " %");
+  const tvmax = Math.max(...SC.map(s => R.scn[s].sch.tv));
+  add(r1, "Расчетный период вмещает срок ввода и срок эксплуатации",
+    Math.ceil(tvmax) + p.op_years <= p.n_years,
+    "нужно не менее " + (Math.ceil(tvmax) + p.op_years) + " лет, задано " + p.n_years);
+  add(r1, "Число лет загрузки не превышает срок эксплуатации",
+    p.load.length <= p.op_years, "лет загрузки " + p.load.length + ", срок эксплуатации " + p.op_years);
+  add(r1, "Срок амортизации не превышает срок эксплуатации",
+    p.amort_years <= p.op_years, "амортизация " + p.amort_years + " лет, эксплуатация " + p.op_years);
+  add(r1, "Вероятности событий в пределах от 0 до 100 %",
+    p.p_ev.every(v => v >= 0 && v <= 1), p.p_ev.map(v => num2s(v * 100)).join("; ") + " %");
+
+  /* 2. расчет на текущих данных */
+  const r2 = [];
+  SC.forEach(s => {
+    const rows = R.scn[s].rows, i = R.scn[s].ind;
+    const sum = k => rows.reduce((a, x) => a + x[k], 0);
+    const near = (a, b, tol) => Math.abs(a - b) <= tol;
+    add(r2, SCL[s] + ". Сумма дисконтированных потоков равна ЧДД",
+      near(sum("pv"), i.npv, 1e-6), nf(sum("pv"), 4) + " и " + nf(i.npv, 4));
+    add(r2, SCL[s] + ". Накопленный поток последнего года равен ЧДД",
+      near(rows[rows.length - 1].cumd, i.npv, 1e-6), nf(rows[rows.length - 1].cumd, 4));
+    if (i.irr === null) r2.push([SCL[s] + ". ВНД", "Корень не определен в интервале поиска", "—"]);
+    else add(r2, SCL[s] + ". ЧДД при ставке, равной ВНД, обращается в ноль",
+      near(MODEL.npv_at(rows, i.irr), 0, 1e-6), nf(MODEL.npv_at(rows, i.irr), 6));
+    add(r2, SCL[s] + ". Сумма инновационных затрат равна инновационной части бюджета",
+      near(sum("inn"), p.b_inn, 1e-6), nf(sum("inn"), 4) + " и " + nf(p.b_inn, 4));
+    add(r2, SCL[s] + ". Сумма признанных расходов на НИОКР равна инновационной части",
+      near(sum("rnd"), p.b_inn, 1e-6), nf(sum("rnd"), 4));
+    add(r2, SCL[s] + ". Сумма инвестиционных затрат равна инвестиционной части бюджета",
+      near(sum("inv"), p.b_inv, 1e-6), nf(sum("inv"), 4) + " и " + nf(p.b_inv, 4));
+    add(r2, SCL[s] + ". Индекс доходности равен отношению приведенных величин",
+      near(i.pi, i.pv_cf / i.pv_ic, 1e-9), nf(i.pi, 6));
+  });
+
+  const w1 = el("div");
+  w1.appendChild(el("p", { class: bad ? "err" : "concl" }, bad
+    ? "Нарушено условий: " + bad + ". Проверьте отмеченные строки."
+    : "Все условия выполнены на введенных данных."));
+  w1.appendChild(table(["Условие", "Фактически", "Результат"], r1, "wide"));
+  box.appendChild(card("Проверка введенных данных", w1));
+
+  const w2 = el("div");
+  w2.appendChild(el("p", { class: "note" },
+    "Тождество \u2014 равенство, которое обязано выполняться при любых исходных данных, если расчет построен без ошибок. По каждому сценарию проверяются семь таких равенств. Сумма дисконтированных годовых потоков должна совпадать с чистым дисконтированным доходом, накопленный поток последнего года \u2014 с тем же значением, чистый дисконтированный доход при ставке, равной внутренней норме доходности, должен обращаться в ноль, суммы инновационных затрат, признанных расходов на НИОКР и инвестиционных затрат по годам должны совпадать с соответствующими частями бюджета, индекс доходности должен равняться отношению приведенных поступлений к приведенным вложениям. Равенства пересчитываются на тех значениях, которые введены в форме, поэтому проверка действует и после изменения любого параметра. Нарушение любой строки означает ошибку в данных или в расчете."));
+  w2.appendChild(table(["Условие", "Фактически", "Результат"], r2, "wide"));
+  box.appendChild(card("Проверка расчета на введенных данных", w2));
+
+}
+
+
+
+/* ================= отчет по расчету ================= */
+const REP_SECTIONS = [
+  ["inputs", "Входные данные"],
+  ["check", "Проверка данных и тождеств расчета"],
+  ["summary", "Показатели эффективности сценариев"],
+  ["calendar", "Календарный план"],
+  ["flows", "Денежные потоки"],
+  ["sens", "Чувствительность"],
+  ["mc", "Имитационное моделирование"],
+  ["ev", "События доработки"],
+  ["tax", "Налоговые расчеты"],
+  ["pick", "Выбор сценария"]
+];
+const REPSEL = { depth: "std", scn: "TRL6", sections: {} };
+const REP_DEPTHS = [
+  ["short", "Кратко. Только графики и итоговые таблицы"],
+  ["std", "Стандартно. Графики и основные таблицы"],
+  ["full", "Подробно. Все таблицы расчета"]
+];
+
+function vRep(box) {
+  if (!RES) compute();
+  const w = el("div");
+  w.appendChild(el("p", { class: "note" },
+    "Отчет содержит таблицы и графики по результатам расчета. Выберите разделы и глубину "
+    + "детализации, затем нажмите кнопку «Просмотр отчета». Отчет откроется на экране. "
+    + "Печать и сохранение в файл PDF выполняются штатными средствами браузера."));
+  const cols = el("div", { class: "cols" });
+  const c1 = el("div", { class: "col" });
+  c1.appendChild(el("h4", null, "Состав отчета"));
+  const boxes = {};
+  REP_SECTIONS.forEach(([k, name]) => {
+    const lb = el("label");
+    const cb = el("input", { type: "checkbox" });
+    cb.checked = REPSEL.sections[k] !== false;
+    cb.onchange = () => { REPSEL.sections[k] = cb.checked; };
+    boxes[k] = cb;
+    lb.appendChild(cb); lb.appendChild(document.createTextNode(" " + name));
+    c1.appendChild(lb);
+  });
+  const all = el("button", { class: "sm" }, "Отметить все");
+  all.onclick = () => { REP_SECTIONS.forEach(([k]) => { boxes[k].checked = true; REPSEL.sections[k] = true; }); };
+  const none = el("button", { class: "sm" }, "Снять все");
+  none.onclick = () => { REP_SECTIONS.forEach(([k]) => { boxes[k].checked = false; REPSEL.sections[k] = false; }); };
+  const bb = el("div", { class: "bar" }); bb.appendChild(all); bb.appendChild(none);
+  c1.appendChild(bb);
+
+  const c2 = el("div", { class: "col" });
+  c2.appendChild(el("h4", null, "Глубина детализации"));
+  const deep = {};
+  REP_DEPTHS.forEach(([k, name]) => {
+    const lb = el("label");
+    const rb = el("input", { type: "radio", name: "repdepth", value: k });
+    if (k === REPSEL.depth) rb.checked = true;
+    rb.onchange = () => { REPSEL.depth = k; };
+    deep[k] = rb;
+    lb.appendChild(rb); lb.appendChild(document.createTextNode(" " + name));
+    c2.appendChild(lb);
+  });
+  c2.appendChild(el("h4", null, "Сценарий для графика денежного потока"));
+  const sel = el("select");
+  SC.forEach(x => { const o = el("option", { value: x }, SCL[x]); if (x === REPSEL.scn) o.selected = true; sel.appendChild(o); });
+  sel.onchange = () => { REPSEL.scn = sel.value; };
+  c2.appendChild(sel);
+  c2.appendChild(el("p", { class: "hint" },
+    MCR ? ("Прогоны выполнены, в отчет войдут результаты " + MCR.N + " прогонов")
+        : "Прогоны не выполнялись. Раздел имитационного моделирования войдет в отчет после расчета на вкладке «Имитационное моделирование»"));
+  cols.appendChild(c1); cols.appendChild(c2);
+  w.appendChild(cols);
+  const act = el("div", { class: "bar" });
+  const go = el("button", { class: "pri" }, "Просмотр отчета");
+  go.onclick = () => {
+    const keys = {};
+    REP_SECTIONS.forEach(([k]) => { if (boxes[k].checked) keys[k] = true; });
+    if (!Object.keys(keys).length) { alert("Выберите хотя бы один раздел"); return; }
+    reportView({ depth: REPSEL.depth, sections: keys, scn: REPSEL.scn });
+  };
+  act.appendChild(go);
+  w.appendChild(act);
+  box.appendChild(card("Отчет по расчету", w));
+}
+
+function repSec(box, title, first) {
+  const h = el("div", { class: "rsec" + (first ? "" : " pb") }, title);
+  box.appendChild(h);
+}
+
+function reportClose() {
+  document.body.classList.remove("printing");
+  const box = document.getElementById("report");
+  if (box) box.innerHTML = "";
+  window.scrollTo(0, 0);
+}
+
+function reportView(opts) {
+  const R = RES, p = R.p;
+  const full = opts.depth === "full", std = opts.depth !== "short";
+  const box = document.getElementById("report");
+  box.innerHTML = "";
+  let num = 0;
+  const sec = (k, name) => { if (!opts.sections[k]) return false; num++; repSec(box, num + ". " + name, num === 1); return true; };
+
+  /* титул */
+  const t = el("div", { class: "rtitle" });
+  t.appendChild(el("h1", null, "Отчет по расчету"));
+  t.appendChild(el("p", null, "Модель управления инновационной деятельностью при реализации "
+    + "инвестиционного проекта. Расчет сценарных условий интеграции"));
+  box.appendChild(t);
+  const now = new Date();
+  const dd = n => (n < 10 ? "0" : "") + n;
+  box.appendChild(table(["Показатель", "Значение"], [
+    ["Дата формирования отчета", dd(now.getDate()) + "." + dd(now.getMonth() + 1) + "." + now.getFullYear()
+      + " " + dd(now.getHours()) + ":" + dd(now.getMinutes())],
+    ["Версия расчетного модуля", "1.6"],
+    ["Бюджет проекта, млн руб.", nf(p.budget, 1)],
+    ["Доля инновационной части, %", nf(p.share_inn * 100, 1)],
+    ["Ставка дисконтирования, % годовых", nf(p.rate * 100, 1)],
+    ["Расчетный период, лет", String(p.n_years)],
+    ["Глубина детализации", (REP_DEPTHS.find(x => x[0] === opts.depth) || ["", ""])[1].split(".")[0]]
+  ]));
+  box.appendChild(el("p", { class: "concl" },
+    "Расчет выполнен программой модели по введенным значениям. Суммы приведены в млн руб. "
+    + "в постоянных ценах, время указано в годах от начала разработки. Значения показателей "
+    + "зависят от исходных данных и подлежат уточнению по мере выполнения стадий проекта."));
+
+  /* 1. входные данные */
+  if (sec("inputs", "Входные данные")) {
+    const rows = [];
+    FIELDS.forEach(([grp, items]) => {
+      rows.push([{ html: "<b>" + grp.toUpperCase() + "</b>" }, ""]);
+      items.forEach(f => rows.push([f.l, f.t === "bool" ? (STATE[f.k] ? "Да" : "Нет") : toShow(f, STATE[f.k])]));
+    });
+    box.appendChild(table(["Параметр", "Значение"], rows));
+    box.appendChild(el("h4", null, "Производные величины"));
+    box.appendChild(table(["Величина", "Значение"], [
+      ["Инновационная часть бюджета, млн руб.", nf(p.b_inn, 1)],
+      ["Инвестиционная часть бюджета, млн руб.", nf(p.b_inv, 1)],
+      ["Опытная инфраструктура, млн руб.", nf(p.pilot, 1)],
+      ["Операционные расходы, млн руб. в год", nf(p.opex, 2)],
+      ["Техническое обслуживание, млн руб. в год", nf(p.to, 2)],
+      ["Текущий ремонт, млн руб.", nf(p.tr, 2)],
+      ["Капитальный ремонт, млн руб.", nf(p.kr, 2)]]));
+  }
+
+  /* 2. проверка */
+  if (sec("check", "Проверка данных и тождеств расчета")) {
+    const tmp = el("div");
+    vChk(tmp);
+    const cards = [...tmp.querySelectorAll(".card")];
+    const marks = tmp.querySelectorAll("b.n").length;
+    box.appendChild(table(["Блок проверки", "Результат"], [
+      ["Проверка введенных данных", marks ? "есть нарушения" : "все условия выполнены"],
+      ["Проверка тождеств расчета", marks ? "есть нарушения" : "все тождества выполнены"]]));
+    if (full || marks) cards.forEach(c => box.appendChild(c));
+  }
+
+  /* 3. показатели */
+  if (sec("summary", "Показатели эффективности сценариев")) {
+    box.appendChild(barChart(SC.map(s => ({ k: SCL[s], v: R.scn[s].ind.npv, c: COL[s] })), "", "млн руб."));
+    box.appendChild(table(["Сценарий", "ЧДД, млн руб.", "ИД", "ВНД, %", "Срок окупаемости, лет",
+      "Дисконтированный срок, лет", "Срок ввода, лет", "Преимущество, млн руб."],
+      SC.map(s => { const i = R.scn[s].ind;
+        return [SCL[s], nf(i.npv, 1), nf(i.pi, 3), nf(i.irr === null ? null : i.irr * 100, 2), nf(i.pp, 2), nf(i.dpp, 2),
+          nf(R.scn[s].sch.tv, 2), s === "BASE" ? "—" : nf(R.scn[s].adv, 1)]; }), "wide"));
+    box.appendChild(el("h4", null, "Накопленный дисконтированный поток"));
+    const xs = R.scn.BASE.rows.map(r => r.n);
+    box.appendChild(lineChart(xs, SC.map(s => ({ k: SCL[s], c: COL[s], v: R.scn[s].rows.map(r => r.cumd) })),
+      "", "год расчетного периода", "млн руб.", x => String(x), { labels: false, dots: false }));
+    box.appendChild(legend(SC.map(s => ({ k: SCL[s], c: COL[s] }))));
+  }
+
+  /* 4. календарь */
+  if (sec("calendar", "Календарный план")) {
+    const tmp = el("div"); vCal(tmp);
+    const cards = [...tmp.querySelectorAll(".card")];
+    box.appendChild(cards[0]);
+    if (cards[1]) box.appendChild(cards[1]);
+    if (full) cards.slice(2).forEach(c => box.appendChild(c));
+  }
+
+  /* 5. потоки */
+  if (sec("flows", "Денежные потоки")) {
+    box.appendChild(el("p", { class: "note" },
+      "Годовые потоки показаны графически. Итоговая таблица содержит приведенные величины, "
+      + "из которых складывается чистый дисконтированный доход."));
+    const s0 = opts.scn || "TRL6";
+    const rows = R.scn[s0].rows;
+    box.appendChild(el("h4", null, SCL[s0] + ". Денежный поток по годам"));
+    box.appendChild(flowChart(rows, ""));
+    box.appendChild(legend([{ k: "Инновационные затраты", c: COL.TRL6 },
+                            { k: "Инвестиционные затраты", c: COL.TRL5 },
+                            { k: "Поступления от эксплуатации", c: "#9fb8cf" },
+                            { k: "Накопленный дисконтированный поток", c: "#003366" }]));
+    box.appendChild(el("p", { class: "note" },
+      "Столбцы вниз показывают затраты года, причем инновационные затраты включают опытную "
+      + "инфраструктуру, затраты на доработки и затраты ожидания. Столбцы вверх показывают "
+      + "поступления от эксплуатации за вычетом налога. Линия показывает накопленный "
+      + "дисконтированный поток."));
+    box.appendChild(el("h4", null, SCL[s0] + ". Годовой денежный поток"));
+    box.appendChild(lineChart(rows.map(r => r.year),
+      [{ k: "Поток", c: COL[s0], v: rows.map(r => r.cf) },
+       { k: "Дисконтированный поток", c: "#0079C2", v: rows.map(r => r.pv) }],
+      "", "календарный год", "млн руб.", x => String(x), { labels: false, dots: false }));
+    box.appendChild(legend([{ k: "Поток", c: COL[s0] }, { k: "Дисконтированный поток", c: "#0079C2" }]));
+    box.appendChild(el("h4", null, "Итоговая таблица приведенных величин"));
+    box.appendChild(table(["Сценарий", "Приведенные поступления", "Приведенные вложения",
+      "Приведенный налог", "ЧДД, млн руб."],
+      SC.map(s => { const i = R.scn[s].ind;
+        return [SCL[s], nf(i.pv_cf, 1), nf(i.pv_ic, 1),
+          nf(R.scn[s].rows.reduce((a, r) => a + r.tax * r.df, 0), 1), nf(i.npv, 1)]; })));
+    if (full) {
+      const keep = window._fs;
+      window._fs = s0;                       // карточки вкладки строятся по сценарию отчета
+      const tmp = el("div"); vFlow(tmp);
+      window._fs = keep;
+      [...tmp.querySelectorAll(".card")].slice(1).forEach(c => box.appendChild(c));
+    }
+  }
+
+  /* 6. чувствительность */
+  if (sec("sens", "Чувствительность")) {
+    const tmp = el("div"); vSens(tmp);
+    [...tmp.querySelectorAll(".card")].forEach((c, i) => {
+      if (!std) [...c.querySelectorAll("table")].forEach(x => x.remove());
+      box.appendChild(c);
+    });
+  }
+
+  /* 7. имитация */
+  if (sec("mc", "Имитационное моделирование")) {
+    if (!MCR) {
+      box.appendChild(el("p", { class: "note" },
+        "Прогоны не выполнялись. Для включения раздела выполните расчет на вкладке "
+        + "«Имитационное моделирование»."));
+    } else {
+      const M = MCR;
+      box.appendChild(el("p", { class: "note" },
+        "Выполнено " + M.N + " прогонов, начальное значение генератора " + M.seed
+        + ". При каждом прогоне одновременно отклоняются сроки, ставка, выручка "
+        + "и параметры доработок."));
+      box.appendChild(el("h4", null, "Распределение чистого дисконтированного дохода"));
+      box.appendChild(histChart(M, false, 46));
+      box.appendChild(el("h4", null, "Диапазон от P10 до P90"));
+      box.appendChild(rangeChart(SC.map(s => ({ k: SCL[s], p10: M.scn[s].p10, p50: M.scn[s].p50,
+        p90: M.scn[s].p90, c: COL[s] })), "млн руб."));
+      box.appendChild(table(["Сценарий", "P10", "Медиана", "P90", "Среднее",
+        "Отрицательный ЧДД, %", "Лучше базового, %"],
+        SC.map(s => { const m = M.scn[s];
+          return [SCL[s], nf(m.p10, 1), nf(m.p50, 1), nf(m.p90, 1), nf(m.mean, 1),
+            nf(m.neg * 100, 1), s === "BASE" ? "—" : nf(m.beat_base * 100, 1)]; })));
+      if (full) {
+        box.appendChild(el("h4", null, "Сравнение сценариев TRL5 и TRL6"));
+        box.appendChild(table(["Величина", "Значение"], [
+          ["Разность ЧДД, P10, млн руб.", nf(M.d56.p10, 1)],
+          ["Разность ЧДД, медиана, млн руб.", nf(M.d56.p50, 1)],
+          ["Разность ЧДД, P90, млн руб.", nf(M.d56.p90, 1)],
+          ["Прогонов, в которых TRL5 лучше, %", nf(M.d56.pos * 100, 1)]]));
+      }
+    }
+  }
+
+  /* 8. доработки */
+  if (sec("ev", "События доработки")) {
+    box.appendChild(riskAdvChart(R));
+    box.appendChild(el("h4", null, "Итог по исходам событий"));
+    box.appendChild(table(["Сценарий", "ЧДД без событий", "Ожидаемый ЧДД", "Ожидаемая потеря",
+      "Наихудший ЧДД", "Преимущество в наихудшем исходе", "Исходов"],
+      ["TRL7", "TRL6", "TRL5"].map(s => {
+        const o = R.scn[s].out, worst = Math.min(...o.items.map(i => i.npv));
+        return [SCL[s], nf(o.npv0, 1), nf(o.E_npv, 1), nf(o.E_loss, 2), nf(worst, 1),
+          nf(worst - R.base, 1), String(o.items.length)]; }), "wide"));
+    box.appendChild(riskContribChart(R));
+    if (full) {
+      const tmp = el("div"); vEv(tmp);
+      [...tmp.querySelectorAll(".card")].forEach(c => box.appendChild(c));
+    }
+  }
+
+  /* 9. налоги */
+  if (sec("tax", "Налоговые расчеты")) {
+    const tmp = el("div"); vTax(tmp);
+    [...tmp.querySelectorAll(".card")].forEach(c => {
+      if (!std) [...c.querySelectorAll("table")].forEach(x => x.remove());
+      box.appendChild(c);
+    });
+  }
+
+  /* 10. выбор */
+  if (sec("pick", "Выбор сценария")) {
+    const tmp = el("div"); vPick(tmp);
+    [...tmp.querySelectorAll(".card")].forEach(c => box.appendChild(c));
+  }
+
+  box.appendChild(el("p", { class: "note" },
+    "Отчет сформирован программой модели. Автор и разработчик Postautov_K_V."));
+
+  document.body.classList.add("printing");
+  window.scrollTo(0, 0);
+}
+
+/* ---------- выгрузка ---------- */
+
+/* ---------- диаграмма диапазонов ---------- */
+function rangeChart(data, unit) {
+  const W = 680, H = 54 + data.length * 44, L = 132, Rr = 26, T = 24;
+  const s = svgBox(W, H);
+  let lo = Math.min(...data.map(d => d.p10)), hi = Math.max(...data.map(d => d.p90));
+  const pad = (hi - lo) * 0.08 || 1; lo -= pad; hi += pad;
+  const x = v => L + (v - lo) / (hi - lo) * (W - L - Rr);
+  const yb = H - 28;
+  for (let i = 0; i <= 4; i++) {
+    const v = lo + (hi - lo) * i / 4;
+    s.appendChild(sv("line", { x1: x(v), x2: x(v), y1: T - 10, y2: yb, class: "grid" }));
+    s.appendChild(sv("text", { x: x(v), y: yb + 15, class: "ax", "text-anchor": "middle" }, nf(v, 0)));
+  }
+  if (lo < 0 && hi > 0) s.appendChild(sv("line", { x1: x(0), x2: x(0), y1: T - 10, y2: yb, class: "zero" }));
+  data.forEach((d, i) => {
+    const y = T + 12 + i * 44;
+    s.appendChild(sv("text", { x: 0, y: y + 4, class: "ax" }, d.k));
+    s.appendChild(sv("rect", { x: x(d.p10), y: y - 8, width: Math.max(2, x(d.p90) - x(d.p10)), height: 16, rx: 4, fill: d.c, opacity: 0.3 }));
+    [d.p10, d.p90].forEach(v => s.appendChild(sv("line", { x1: x(v), x2: x(v), y1: y - 11, y2: y + 11, stroke: d.c, "stroke-width": 1.6 })));
+    s.appendChild(sv("circle", { cx: x(d.p50), cy: y, r: 4.4, fill: d.c, stroke: "#fff", "stroke-width": 1.4 }));
+    s.appendChild(sv("text", { x: x(d.p50), y: y - 15, class: "vl", "text-anchor": "middle", fill: d.c }, nf(d.p50, 0)));
+  });
+  s.appendChild(sv("text", { x: 0, y: H - 2, class: "ax" }, unit));
+  return s;
+}
+
+/* ---------- распределение прогонов по сценариям ---------- */
+function histChart(M, smooth, bins) {
+  bins = bins || 46;
+  const W = 700, H = 400, S = 2;
+  const L = 58, Rr = 14, T = 14, B = 44;
+  const cv = el("canvas");
+  cv.width = W * S; cv.height = H * S;
+  cv.style.width = W + "px"; cv.style.height = H + "px";
+  const g = cv.getContext("2d");
+  g.scale(S, S);
+  g.fillStyle = "#fff"; g.fillRect(0, 0, W, H);
+  const all = [];
+  SC.forEach(s => M.series[s].forEach(v => all.push(v)));
+  const xlo = Math.min(...all), xhi = Math.max(...all);
+  const bw = (xhi - xlo) / bins;
+  const hist = {}, dens = {};
+  let ymax = 0;
+  SC.forEach(s => {
+    const c = new Array(bins).fill(0);
+    M.series[s].forEach(v => {
+      let i = Math.floor((v - xlo) / bw);
+      if (i >= bins) i = bins - 1;
+      if (i < 0) i = 0;
+      c[i]++;
+    });
+    hist[s] = c;
+    ymax = Math.max(ymax, ...c);
+  });
+  if (smooth) {
+    /* ядерная оценка плотности, приведенная к числу прогонов в интервале */
+    const grid = 180;
+    SC.forEach(s => {
+      const a = M.series[s], n = a.length;
+      const mean = a.reduce((x, y) => x + y, 0) / n;
+      const sd = Math.sqrt(a.reduce((x, y) => x + (y - mean) * (y - mean), 0) / n);
+      const h = 1.06 * sd * Math.pow(n, -0.2);
+      const srt = a.slice().sort((x, y) => x - y);
+      const d = [];
+      for (let i = 0; i <= grid; i++) {
+        const x = xlo + (xhi - xlo) * i / grid;
+        let sum = 0;
+        for (let j = 0; j < n; j += 2) {
+          const z = (x - srt[j]) / h;
+          if (z > -4 && z < 4) sum += Math.exp(-0.5 * z * z);
+        }
+        d.push([x, sum * 2 / (n * h * Math.sqrt(2 * Math.PI)) * n * bw]);
+      }
+      dens[s] = d;
+    });
+    ymax = 0;
+    SC.forEach(s => dens[s].forEach(d => { if (d[1] > ymax) ymax = d[1]; }));
+  }
+  ymax *= 1.1;
+  const X = v => L + (v - xlo) / (xhi - xlo) * (W - L - Rr);
+  const Y = v => T + (ymax - v) / ymax * (H - T - B);
+  g.font = "11px Arial, sans-serif"; g.textBaseline = "middle";
+  g.strokeStyle = "#ededea"; g.lineWidth = 1;
+  const st = niceStep(ymax);
+  for (let v = 0; v <= ymax; v += st) {
+    g.beginPath(); g.moveTo(L, Y(v) + 0.5); g.lineTo(W - Rr, Y(v) + 0.5); g.stroke();
+    g.fillStyle = "#6b6b66"; g.textAlign = "right"; g.fillText(nf(v, 0), L - 7, Y(v));
+  }
+  g.textAlign = "center"; g.textBaseline = "top";
+  const sx = niceStep(xhi - xlo);
+  for (let v = Math.ceil(xlo / sx) * sx; v <= xhi; v += sx) {
+    g.fillStyle = "#6b6b66"; g.fillText(nf(v, 0), X(v), H - B + 8);
+  }
+  /* ноль */
+  g.strokeStyle = "#52514e"; g.lineWidth = 1.2;
+  g.beginPath(); g.moveTo(X(0) + 0.5, T); g.lineTo(X(0) + 0.5, Y(0)); g.stroke();
+  /* кривые */
+  SC.forEach(s => {
+    g.strokeStyle = COL[s]; g.lineWidth = 1.7; g.lineJoin = "round";
+    g.beginPath();
+    if (smooth) {
+      dens[s].forEach((d, i) => i ? g.lineTo(X(d[0]), Y(d[1])) : g.moveTo(X(d[0]), Y(d[1])));
+    } else {
+      g.moveTo(X(xlo), Y(0));
+      for (let i = 0; i < bins; i++) {
+        g.lineTo(X(xlo + i * bw), Y(hist[s][i]));
+        g.lineTo(X(xlo + (i + 1) * bw), Y(hist[s][i]));
+      }
+      g.lineTo(X(xhi), Y(0));
+    }
+    g.stroke();
+  });
+  /* медианы */
+  const lab = [];
+  SC.forEach(s => {
+    const a = M.series[s].slice().sort((x, y) => x - y);
+    const m = a[Math.floor(0.5 * (a.length - 1))];
+    let hgt;
+    if (smooth) {
+      const d = dens[s];
+      let k = 0; while (k < d.length - 1 && d[k][0] < m) k++;
+      hgt = d[k][1];
+    } else {
+      let i = Math.floor((m - xlo) / bw); if (i >= bins) i = bins - 1; if (i < 0) i = 0;
+      hgt = hist[s][i];
+    }
+    g.strokeStyle = COL[s]; g.lineWidth = 1.6; g.setLineDash([4, 3]);
+    g.beginPath(); g.moveTo(X(m) + 0.5, Y(0)); g.lineTo(X(m) + 0.5, Y(hgt)); g.stroke();
+    g.setLineDash([]);
+    g.fillStyle = COL[s];
+    g.beginPath();
+    g.moveTo(X(m), Y(0)); g.lineTo(X(m) - 4.5, Y(0) + 7); g.lineTo(X(m) + 4.5, Y(0) + 7);
+    g.closePath(); g.fill();
+    lab.push([X(m), Y(hgt), m, COL[s]]);
+  });
+  lab.sort((a, b) => a[0] - b[0]);
+  const put = [];
+  g.font = "bold 10.5px Arial, sans-serif"; g.textAlign = "center"; g.textBaseline = "bottom";
+  lab.forEach(([x, y, m, c]) => {
+    let yy = y - 4;
+    while (put.some(q => Math.abs(q[0] - x) < 48 && Math.abs(q[1] - yy) < 14)) yy -= 14;
+    put.push([x, yy]);
+    g.fillStyle = c;
+    g.fillText("Ме " + nf(m, 0), x, yy);
+  });
+  /* легенда */
+  g.font = "11px Arial, sans-serif"; g.textAlign = "left"; g.textBaseline = "middle";
+  let ly = T + 10;
+  const lx = W - Rr - 232;
+  g.globalAlpha = 0.85; g.fillStyle = "#fff";
+  g.fillRect(lx - 6, T + 2, 232, 4 + SC.length * 16); g.globalAlpha = 1;
+  SC.forEach(s => {
+    g.strokeStyle = COL[s]; g.lineWidth = 1.8;
+    g.beginPath(); g.moveTo(lx, ly); g.lineTo(lx + 20, ly); g.stroke();
+    g.fillStyle = "#333";
+    g.fillText(SCL[s] + ", убыточных " + nf(M.scn[s].neg * 100, 1) + " %", lx + 26, ly);
+    ly += 16;
+  });
+  g.fillStyle = "#6b6b66"; g.textAlign = "center"; g.textBaseline = "top";
+  g.fillText("ЧДД, млн руб.", (L + W - Rr) / 2, H - B + 25);
+  g.save(); g.translate(12, (T + H - B) / 2); g.rotate(-Math.PI / 2);
+  g.textAlign = "center"; g.textBaseline = "top";
+  g.fillText("число прогонов", 0, 0); g.restore();
+  return cv;
+}
+
+/* ---------- облако прогонов (canvas, 20 000 точек) ---------- */
+function cloudChart(M, bins) {
+  bins = bins || 12;
+  const W = 700, H = 380, S = 2;
+  const L = 62, Rr = 14, T = 16, B = 42;
+  const wrap = el("div");
+  const cv = el("canvas");
+  cv.width = W * S; cv.height = H * S;
+  cv.style.width = W + "px"; cv.style.height = H + "px";
+  const g = cv.getContext("2d");
+  g.scale(S, S);
+  const rate = M.rates.map(v => v * 100);
+  const all = [];
+  SC.forEach(s => M.series[s].forEach(v => all.push(v)));
+  const srt = all.slice().sort((a, b) => a - b);
+  const q = x => srt[Math.floor(x * (srt.length - 1))];
+  let ylo = q(0.004), yhi = q(0.996);
+  const pad = (yhi - ylo) * 0.04; ylo -= pad; yhi += pad;
+  const xlo = 9.9, xhi = 16.1;
+  const X = v => L + (v - xlo) / (xhi - xlo) * (W - L - Rr);
+  const Y = v => T + (yhi - v) / (yhi - ylo) * (H - T - B);
+  g.fillStyle = "#fff"; g.fillRect(0, 0, W, H);
+  /* сетка */
+  g.font = "11px Arial, sans-serif"; g.textBaseline = "middle";
+  g.strokeStyle = "#e8e6e0"; g.lineWidth = 1;
+  const stepY = niceStep(yhi - ylo);
+  for (let v = Math.ceil(ylo / stepY) * stepY; v <= yhi; v += stepY) {
+    g.beginPath(); g.moveTo(L, Y(v) + 0.5); g.lineTo(W - Rr, Y(v) + 0.5); g.stroke();
+    g.fillStyle = "#6b6b66"; g.textAlign = "right";
+    g.fillText(nf(v, 0), L - 7, Y(v));
+  }
+  g.textAlign = "center"; g.textBaseline = "top";
+  for (let v = 10; v <= 16; v++) {
+    g.fillStyle = "#6b6b66";
+    g.fillText(nf(v, 0) + " %", X(v), H - B + 8);
+  }
+  /* точки */
+  const N = M.N;
+  SC.forEach(s => {
+    const a = M.series[s];
+    g.fillStyle = COL[s]; g.globalAlpha = 0.3;
+    for (let i = 0; i < N; i++) {
+      const y = a[i];
+      if (y < ylo || y > yhi) continue;
+      g.fillRect(X(rate[i]) - 0.75, Y(y) - 0.75, 1.5, 1.5);
+    }
+  });
+  g.globalAlpha = 1;
+  /* нулевая линия */
+  if (ylo < 0 && yhi > 0) {
+    g.strokeStyle = "#52514e"; g.lineWidth = 1.2;
+    g.beginPath(); g.moveTo(L, Y(0) + 0.5); g.lineTo(W - Rr, Y(0) + 0.5); g.stroke();
+    g.fillStyle = "#52514e"; g.textAlign = "right"; g.textBaseline = "bottom";
+    g.font = "10.5px Arial, sans-serif";
+    g.fillText("нулевой доход", W - Rr - 3, Y(0) - 2);
+  }
+  /* медианы по диапазонам ставки */
+  const edges = [];
+  for (let i = 0; i <= bins; i++) edges.push(10 + 6 * i / bins);
+  const med = {};
+  SC.forEach(s => {
+    const a = M.series[s], pts = [];
+    for (let i = 0; i < bins; i++) {
+      const v = [];
+      for (let j = 0; j < N; j++) if (rate[j] >= edges[i] && rate[j] < edges[i + 1]) v.push(a[j]);
+      if (!v.length) continue;
+      v.sort((x, y) => x - y);
+      pts.push([(edges[i] + edges[i + 1]) / 2, v[Math.floor(0.5 * (v.length - 1))]]);
+    }
+    med[s] = pts;
+  });
+  SC.forEach(s => {
+    const pts = med[s];
+    [["#ffffff", 5.2], [COL[s], 2.6]].forEach(([c, w]) => {
+      g.strokeStyle = c; g.lineWidth = w; g.lineJoin = "round"; g.lineCap = "round";
+      g.beginPath();
+      pts.forEach((p2, i) => i ? g.lineTo(X(p2[0]), Y(p2[1])) : g.moveTo(X(p2[0]), Y(p2[1])));
+      g.stroke();
+    });
+  });
+  /* легенда */
+  g.font = "11px Arial, sans-serif"; g.textAlign = "left"; g.textBaseline = "middle";
+  g.globalAlpha = 0.82; g.fillStyle = "#fff";
+  g.fillRect(L + 6, T - 4, 196, 4 + SC.length * 15);
+  g.globalAlpha = 1;
+  let ly = T + 4;
+  SC.forEach(s => {
+    const a = M.series[s].slice().sort((x, y) => x - y);
+    const m = a[Math.floor(0.5 * (a.length - 1))];
+    g.strokeStyle = COL[s]; g.lineWidth = 2.6;
+    g.beginPath(); g.moveTo(L + 10, ly); g.lineTo(L + 30, ly); g.stroke();
+    g.fillStyle = "#333";
+    g.fillText(SCL[s] + ", медиана " + nf(m, 0), L + 36, ly);
+    ly += 15;
+  });
+  g.fillStyle = "#6b6b66"; g.textAlign = "center"; g.textBaseline = "top";
+  g.font = "11px Arial, sans-serif";
+  g.fillText("ставка дисконтирования в прогоне", (L + W - Rr) / 2, H - B + 24);
+  g.save(); g.translate(13, (T + H - B) / 2); g.rotate(-Math.PI / 2);
+  g.textAlign = "center"; g.textBaseline = "top";
+  g.fillText("ЧДД, млн руб.", 0, 0); g.restore();
+  wrap.appendChild(cv);
+  return wrap;
+}
+function niceStep(range) {
+  const raw = range / 6, p10 = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p10;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p10;
+}
+
+/* ---------- вкладка «Имитационное моделирование» ---------- */
+function vMC(box) {
+  const w = card("Имитационное моделирование методом Монте-Карло");
+  w.appendChild(el("p", { class: "note" },
+    "В каждом прогоне сроки разработки и строительства, вероятности и затраты доработок, выручка и ставка дисконтирования отклоняются одновременно и случайно, а доработки наступают случайно с заданными вероятностями. Все четыре сценария одного прогона считаются на одном наборе отклонений, поэтому сценарии сравнимы между собой."));
+  w.appendChild(el("p", { class: "note" },
+    "Приняты следующие отклонения. Сроки разработки и строительства, а также выручка отклоняются на 15 %, вероятности событий на 50 %, затраты и задержки событий на 40 %, ставка дисконтирования распределена равномерно от 10 до 16 %. Для логнормальных множителей указано стандартное отклонение логарифма. Среднее множителя равно единице."));
+  const bar = el("div", { class: "bar" });
+  bar.appendChild(el("span", null, "Число прогонов"));
+  const selN = el("select");
+  [1000, 5000, 20000].forEach(n => { const o = el("option", { value: String(n) }, String(n)); if (n === MCN) o.selected = true; selN.appendChild(o); });
+  bar.appendChild(selN);
+  bar.appendChild(el("span", null, "Начальное значение генератора"));
+  const inS = el("input", { type: "text", inputmode: "numeric", style: "width:104px;padding:5px 7px;border:1px solid #d6d6d0;border-radius:4px;font:13px inherit" });
+  inS.value = String(MCSEED);
+  if (MCRND) inS.disabled = true;
+  bar.appendChild(inS);
+  const rc = el("input", { type: "checkbox", id: "mc_rnd" });
+  rc.checked = MCRND;
+  rc.onchange = () => { MCRND = rc.checked; inS.disabled = MCRND; };
+  bar.appendChild(rc);
+  bar.appendChild(el("label", { for: "mc_rnd" }, "случайное начальное значение"));
+  const btn = el("button", { class: "pri sm" }, MCR ? "Повторить прогоны" : "Выполнить прогоны");
+  bar.appendChild(btn);
+  w.appendChild(bar);
+  btn.onclick = () => {
+    MCN = parseInt(selN.value, 10) || 5000;
+    if (MCRND) {
+      MCSEED = 1 + Math.floor(Math.random() * 2147483646);
+    } else {
+      const sd = parseInt(inS.value, 10); MCSEED = isFinite(sd) ? sd : 20261107;
+    }
+    inS.value = String(MCSEED);
+    btn.textContent = "Идет расчет, ожидайте"; btn.disabled = true;
+    const run = RES;
+    setTimeout(() => {
+      if (run !== RES) return;
+      try { MCR = MODEL.monteCarlo(run.p, MCN, MCSEED); render(); }
+      catch (e) { MCR=null; render(); const m=document.getElementById("msg"); m.className="err"; m.textContent="Имитация остановлена. " + e.message; }
+    }, 30);
+  };
+  box.appendChild(w);
+  if (!MCR) {
+    box.appendChild(card(null, el("p", { class: "note" },
+      "Прогоны не выполнены. Расчет 5 000 прогонов занимает около двух секунд, расчет 20 000 прогонов около восьми секунд.")));
+    return;
+  }
+  const M = MCR, pct = v => nf(v * 100, 1);
+  box.appendChild(el("p", { class: "note", style: "margin:0 0 10px" },
+    "Расчет выполнен при начальном значении генератора " + M.seed + ". Чтобы повторить его в точности, впишите это число в поле и снимите флажок случайного значения."));
+  box.appendChild(card("Распределение чистого дисконтированного дохода, " + M.N + " прогонов",
+    table(["Сценарий", "P10, млн руб.", "Медиана, млн руб.", "P90, млн руб.", "Среднее, млн руб.",
+      "Прогонов с отрицательным ЧДД, %", "Прогонов лучше базового, %", "Прогонов, где сценарий лучший, %"],
+      SC.map(s => { const m = M.scn[s];
+        return [SCL[s], nf(m.p10, 1), nf(m.p50, 1), nf(m.p90, 1), nf(m.mean, 1), pct(m.neg),
+          s === "BASE" ? "—" : pct(m.beat_base), pct(m.best)]; }), "wide")));
+  const hc = card("Распределение чистого дисконтированного дохода по сценариям");
+  const hbar = el("div", { class: "bar" });
+  const cb = el("input", { type: "checkbox", id: "mc_sm" });
+  cb.checked = !!MCSM;
+  cb.onchange = () => { MCSM = cb.checked; render(); };
+  const lbl = el("label", { for: "mc_sm" }, "сглаженная кривая вместо ступенчатой");
+  hbar.appendChild(cb); hbar.appendChild(lbl);
+  hc.appendChild(hbar);
+  hc.appendChild(histChart(M, MCSM));
+  hc.appendChild(el("p", { class: "note" },
+    MCSM
+      ? "Показана сглаженная оценка плотности. Она выглядит аккуратнее, но зависит от ширины сглаживания и может размыть пик, поэтому для работы рекомендуется ступенчатый вид."
+      : "Ступенчатая линия показывает число прогонов в каждом из сорока шести интервалов дохода и не добавляет значений, которых в расчете не было. Вертикальная линия отмечает нулевой доход, пунктир и треугольник отмечают медиану сценария."));
+  hc.appendChild(el("p", { class: "note" },
+    "Доля прогонов с отрицательным ЧДД составляет " +
+    nf(M.scn.BASE.neg * 100, 1) + " % в Базовом сценарии и " + nf(M.scn.TRL5.neg * 100, 1) +
+    " % в сценарии «Интеграция TRL5»."));
+  box.appendChild(hc);
+  const cc = card("Облако прогонов: доход и ставка дисконтирования", cloudChart(M));
+  cc.appendChild(el("p", { class: "note" },
+    "Каждая точка — один прогон, цвет означает сценарий. По горизонтали отложена ставка дисконтирования этого прогона, по вертикали полученный чистый дисконтированный доход. Жирные линии показывают медиану сценария в двенадцати диапазонах ставки, рядом с правым краем указана медиана сценария по всем прогонам. Линия ломаная, поскольку каждая ее точка это медиана фактических прогонов, а сглаживание добавило бы значения, которых в расчете не было. Для читаемости показаны прогоны между 0,4 и 99,6 процентилями."));
+  box.appendChild(cc);
+  const c = card("Диапазон чистого дисконтированного дохода от P10 до P90",
+    rangeChart(SC.map(s => ({ k: SCL[s], p10: M.scn[s].p10, p50: M.scn[s].p50, p90: M.scn[s].p90, c: COL[s] })), "млн руб."));
+  c.appendChild(el("p", { class: "note" }, "Точка обозначает медиану прогонов. Между границами P10 и P90 находится 80 % исходов."));
+  box.appendChild(c);
+  box.appendChild(card("Преимущество сценариев интеграции к базовому сценарию",
+    table(["Сценарий", "P10, млн руб.", "Медиана, млн руб.", "P90, млн руб.", "Прогонов с преимуществом, %"],
+      ["TRL7", "TRL6", "TRL5"].map(s => { const m = M.scn[s];
+        return [SCL[s], nf(m.adv_p10, 1), nf(m.adv_p50, 1), nf(m.adv_p90, 1), pct(m.beat_base)]; }))));
+  const d = M.d56;
+  box.appendChild(card("Сравнение сценариев «Интеграция TRL5» и «Интеграция TRL6»",
+    table(["Величина", "Значение"], [
+      ["Разность ЧДД, P10, млн руб.", nf(d.p10, 1)],
+      ["Разность ЧДД, медиана, млн руб.", nf(d.p50, 1)],
+      ["Разность ЧДД, P90, млн руб.", nf(d.p90, 1)],
+      ["Прогонов, в которых сценарий TRL5 лучше, %", pct(d.pos)],
+      ["Лучший сценарий интеграции TRL5, доля прогонов, %", pct(M.best_int.TRL5)],
+      ["Лучший сценарий интеграции TRL6, доля прогонов, %", pct(M.best_int.TRL6)],
+      ["Лучший сценарий интеграции TRL7, доля прогонов, %", pct(M.best_int.TRL7)]])));
+  const n1 = card("Пояснения к результату");
+  [
+    "Максимальная стандартная ошибка доли при текущем числе независимых прогонов составляет " + nf(50 / Math.sqrt(M.N),2) + " п.п.",
+    "Расчет выполнен на нормированных данных, поэтому абсолютные значения вероятностей характеризуют не конкретный проект, а поведение модели при принятых отклонениях. Частота выбора каждого сценария приведена в таблице.",
+    "Для воспроизведения сохраните исходные данные, число прогонов и начальное значение генератора."
+  ].forEach(s => n1.appendChild(el("p", { class: "note" }, s)));
+  box.appendChild(n1);
+}
+
+function dl(name, text, mime) {
+  const b = new Blob(["﻿" + text], { type: (mime || "text/plain") + ";charset=utf-8" });
+  const a = document.createElement("a");
+  const url = URL.createObjectURL(b); a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url),1000);
+}
+function csv(head, rows, name) {
+  const q = v => '"' + String(v === null || v === undefined ? "" : (v.html !== undefined ? v.html : v)).replace(/"/g, '""') + '"';
+  const t = [head.map(q).join(";")].concat(rows.map(r => r.map(q).join(";"))).join("\r\n");
+  dl(name + ".csv", t, "text/csv");
+}
+function exportAll() {
+  if (!RES) { compute(); if (!RES) return; }
+  const R = RES; const L = [];
+  const add = (t, head, rows) => { L.push(t); L.push(head.join(";")); rows.forEach(r => L.push(r.join(";"))); L.push(""); };
+  const f = (v, d) => (v === null || v === undefined || !isFinite(v)) ? "" : v.toFixed(d).replace(".", ",");
+  const d=decision(R);
+  add("Решение", ["Версия", "Критерий", "Результат"], [["1.6",d.criterion,d.result]]);
+  add("Допуск сценариев", ["Вариант","Ожидаемый ЧДД","Стресс-ЧДД","Запас к базе","Допуск"],
+    d.rows.map(r=>[SCL[r.key],f(r.expected,2),f(r.stress,2),f(r.reserve,2),r.reason]));
+  add("Входные данные", ["Параметр", "Значение"], Object.keys(MODEL.DEFAULTS).map(k => [k, Array.isArray(STATE[k]) ? STATE[k].join(" ") : String(STATE[k])]));
+  add("Показатели", ["Сценарий", "ЧДД", "ИД", "ВНД", "Срок окупаемости", "Дисконтированный срок", "Срок ввода", "Преимущество"],
+    SC.map(s => [SCL[s], f(R.scn[s].ind.npv, 2), f(R.scn[s].ind.pi, 4), f(R.scn[s].ind.irr, 6), f(R.scn[s].ind.pp, 3), f(R.scn[s].ind.dpp, 3), f(R.scn[s].sch.tv, 3), s === "BASE" ? "" : f(R.scn[s].adv, 2)]));
+  SC.forEach(s => add("Годовые потоки. " + SCL[s], ["Год", "Капитальные затраты", "Выручка", "EBITDA", "Налог", "Поток", "Дисконтированный поток", "Накопленный дисконтированный"],
+    R.scn[s].rows.map(r => [r.year, f(r.capex, 3), f(r.rev, 3), f(r.ebitda, 3), f(r.tax, 3), f(r.cf, 3), f(r.pv, 3), f(r.cumd, 3)])));
+  add("Срок реализации и доли этапов",
+    ["Сценарий", "Срок реализации", "Короче базового, %", "Срок разработки", "Начало проектной документации",
+     "Строительный процесс", "Доля строительного процесса, %", "Совмещение процессов", "Доля совмещения, %"],
+    SC.map(s => { const sch = R.scn[s].sch;
+      const dev = sch.conf_plan[sch.conf_plan.length - 1], ov = Math.max(0, dev - sch.f), bld = sch.tv - sch.f;
+      const tvB = R.scn.BASE.sch.tv;
+      return [SCL[s], f(sch.tv, 2), s === "BASE" ? "" : f((tvB - sch.tv) / tvB * 100, 1), f(dev, 2),
+        f(sch.st[1], 2), f(bld, 2), f(bld / sch.tv * 100, 1), f(ov, 2), f(ov / sch.tv * 100, 1)]; }));
+  SC.forEach(s => { const sch = R.scn[s].sch;
+    add("Календарный план. " + SCL[s], ["Этап", "Начало", "Окончание", "Длительность", "Доля срока реализации, %"],
+      MODEL.TRL_NAMES.map((n, j) => [n, f(sch.trl_start[j], 2), f(sch.conf[j], 2), f(sch.d_trl[j], 2), f(sch.d_trl[j] / sch.tv * 100, 1)])
+        .concat(MODEL.STAGE_NAMES.map((n, j) => [n, f(sch.st[j], 2), f(sch.en[j], 2), f(sch.d_st[j], 2), f(sch.d_st[j] / sch.tv * 100, 1)]))); });
+  add("Чувствительность к ставке", ["Ставка"].concat(SC.map(s => SCL[s])), R.rates.map(r => [f(r.rate, 2)].concat(SC.map(s => f(r[s], 2)))));
+  add("Чувствительность к опытной инфраструктуре", ["Стоимость"].concat(SC.map(s => SCL[s])), R.pilot.map(r => [r.cost].concat(SC.map(s => f(r[s], 2)))));
+  add("Чувствительность к доле инновационной части", ["Доля"].concat(SC.map(s => SCL[s])), R.shares.map(r => [f(r.share, 2)].concat(SC.map(s => f(r[s], 2)))));
+  if (MCR) {
+    const M = MCR;
+    add("Имитационное моделирование, прогонов " + M.N + ", начальное значение " + M.seed,
+      ["Сценарий", "P10", "Медиана", "P90", "Среднее", "Доля прогонов с отрицательным ЧДД", "Доля прогонов лучше базового", "Доля прогонов, где сценарий лучший"],
+      SC.map(s => { const m = M.scn[s]; return [SCL[s], f(m.p10, 2), f(m.p50, 2), f(m.p90, 2), f(m.mean, 2), f(m.neg, 4), s === "BASE" ? "" : f(m.beat_base, 4), f(m.best, 4)]; }));
+    add("Имитационное моделирование. Преимущество к базовому сценарию", ["Сценарий", "P10", "Медиана", "P90"],
+      ["TRL7", "TRL6", "TRL5"].map(s => { const m = M.scn[s]; return [SCL[s], f(m.adv_p10, 2), f(m.adv_p50, 2), f(m.adv_p90, 2)]; }));
+  }
+  dl("Расчет модели интеграции.csv", L.join("\r\n"), "text/csv");
+}
+
+/* ---------- запуск ---------- */
+window.addEventListener("DOMContentLoaded", () => {
+  buildForm();
+  document.getElementById("form").addEventListener("input", () => invalidate("Параметры изменены. Выполните расчет."));
+  document.getElementById("run").onclick = compute;
+  document.getElementById("def").onclick = () => { STATE = Object.assign({}, MODEL.DEFAULTS); buildForm(); compute(); };
+  document.getElementById("save").onclick = () => { if (!RES && !compute()) return; dl("Входные данные модели.json", JSON.stringify(STATE, null, 1), "application/json"); };
+  document.getElementById("load").onclick = () => document.getElementById("file").click();
+  document.getElementById("file").onchange = e => {
+    const f = e.target.files[0]; if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      try {
+        const o = JSON.parse(rd.result);
+        if (!o || typeof o !== "object" || Array.isArray(o) || !Object.keys(DEFAULTS).some(k=>Object.hasOwn(o,k)))
+          throw Error("Нет распознаваемых параметров модели");
+        const loaded={ ...DEFAULTS };
+        for (const k of Object.keys(DEFAULTS)) if (Object.hasOwn(o,k)) loaded[k]=o[k];
+        if (!Object.hasOwn(o,"loss_limit_end") && Object.hasOwn(o,"loss_limit_last_n")) {
+          if (!Number.isSafeInteger(o.loss_limit_last_n) || o.loss_limit_last_n<0) throw Error("Неверный срок ограничения убытков");
+          loaded.loss_limit_end=loaded.first_tax_year+o.loss_limit_last_n-1;
+        }
+        if (!Object.hasOwn(o,"prefer_reserve")) loaded.prefer_reserve=false;
+        validateInputs(loaded);
+        STATE=loaded;
+        buildForm(); compute();
+      } catch (x) { const m = document.getElementById("msg"); m.textContent = "Набор не загружен. " + x.message; m.className = "err"; }
+    };
+    rd.readAsText(f);
+    e.target.value = "";
+  };
+  document.getElementById("exp").onclick = exportAll;
+  document.getElementById("repclose").onclick = reportClose;
+  document.getElementById("repprint").onclick = () => window.print();
+  document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
+    document.querySelectorAll(".tab").forEach(x => x.classList.remove("on"));
+    t.classList.add("on"); render();
+  });
+  compute();
+});
