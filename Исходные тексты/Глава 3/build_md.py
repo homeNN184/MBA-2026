@@ -6,7 +6,7 @@ from formulas import FORM, SYM, NOTES
 import part1, part2, part3, part4
 sys.path.insert(0,"/home/claude/work/final")
 import biblio
-TOFF, FOFF, EQOFF, APOFF = 6, 15, 0, 1
+TOFF, FOFF, EQOFF, APOFF = 8, 15, 0, 1
 body = "\n\n".join(m.text() for m in (part1, part2, part3, part4))
 tabs, figs, eqs = {}, {}, []
 for m in re.finditer(r"⟦(TAB|FIG|F):([a-z0-9]+)", body):
@@ -60,7 +60,7 @@ def mathify(seg):
 parts = re.split(r"(\$\$.*?\$\$|\$[^$\n]+\$)", body, flags=re.S)
 body = "".join(p if i % 2 else mathify(p) for i, p in enumerate(parts))
 # --- ссылки на источники вместо сносок
-CIT = {"gao": (("gao",), None, None), "gost58048": (("gost58048",), "п. 5.1.2", "п. 5.1.2"), "gost58048p13": (("gost58048",), "п. 5.1.13", "п. 5.1.13"), "gost58048p15": (("gost58048",), "п. 4.15", "п. 4.15"),
+CIT = {"gao": (("gao",), None, None), "gost58048": (("gost58048",), "п. 5.1.2", "п. 5.1.2"), "gost58048p13": (("gost58048",), "п. 5.1.13", "п. 5.1.13"), "gost58048p15": (("gost58048",), "п. 4.15", "п. 4.15"), "gost15301": (("gost15301",), None, None),
        "pp87p22": (("a3",), "п. 22", "п. 22"), "pp87p4": (("a3",), "п. 4", "п. 4"), "grk49": (("a1",), "ст. 49", "ст. 49"), "grk49v38": (("a1",), "ст. 49, ч. 3.8", "ст. 49, ч. 3.8"), "grk49v39": (("a1",), "ст. 49, ч. 3.9–3.10", "ст. 49, ч. 3.9–3.10"),
        "sp68": (("a25",), "п. 6.6", "п. 6.6"), "doe": (("a40",), None, None), "p102": (("a38",), None, None), "cooper": (("cooper",), None, None),
        "iso10007": (("iso10007",), None, None), "iso31000": (("iso31000",), "п. 6.5.2–6.5.3", "п. 6.5"), "iec31010": (("iec31010",), None, None),
