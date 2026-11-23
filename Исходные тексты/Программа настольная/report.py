@@ -44,8 +44,8 @@ DEPTHS = [
 class Doc(object):
     """Потоковая верстка отчета на листах формата A4."""
 
-    def __init__(self, title):
-        self.p = PC.PDF(size=PC.A4L, margin=36.0)
+    def __init__(self, title, orient="land"):
+        self.p = PC.PDF(size=(PC.A4 if orient == "port" else PC.A4L), margin=36.0)
         self.title = title
         self.n = 0
         self.toc = []
@@ -269,7 +269,7 @@ class Doc(object):
         self.p.text((x0 + x1) / 2, y0 - 22, "Год расчетного периода", 8.0, col=MUT, align="c")
         self.y -= h + 6
         self.legend([("Инновационные затраты", "#8E44AD"), ("Инвестиционные затраты", "#1B9E77"),
-                     ("Поступления от эксплуатации", "#9fb8cf"),
+                     ("Операционный поток после налога", "#9fb8cf"),
                      ("Накопленный дисконтированный поток", "#003366")])
 
     def lines(self, xs, series, h=160, ylab="", xlab="", xdec=0, xfmt=None):
@@ -385,7 +385,8 @@ def build(R, mc, state, opts, path):
     full = depth == "full"
     std = depth in ("std", "full")
     p = R["p"]
-    d = Doc("Отчет по расчету модели управления инновационной деятельностью")
+    orient = opts.get("orient", "land")
+    d = Doc("Отчет по расчету модели управления инновационной деятельностью", orient)
 
     # ---------------------------------------------------------- титул
     d.p.rect(36, d.p.H - 156, d.wide, 98, fill=NAVY)
@@ -604,7 +605,7 @@ def build(R, mc, state, opts, path):
         h, rows, txt = CA.t_pick(R)
         d.table(h, rows, size=10.0, widths=[14, 10, 12, 12, 11, 11, 14, 9, 11])
         d.note(txt)
-        if R["p"].use_crit:
+        if R["p"].criterion == "crit":
             ok = [s for s in ("TRL7", "TRL6", "TRL5")
                   if min(i["npv"] for i in R["scn"][s]["out"]["items"]) - R["base"] > 0]
             if ok:

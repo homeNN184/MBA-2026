@@ -18,7 +18,7 @@ import report as RP
 
 TITLE = ("Модель управления инновационной деятельностью при реализации "
          "инвестиционного проекта. Расчет сценариев интеграции")
-VERSION = "1.6 от 22.11.2026"
+VERSION = "1.7 от 23.11.2026"
 SIGN = "Дипломный проект, версия программы " + VERSION + "\nАвтор Постаутов К.В."
 BG = "#fcfcfb"
 INK = "#1c1c1a"
@@ -565,6 +565,7 @@ class App(tk.Tk):
         self.configure(bg=BG)
         self.state_data = CA.defaults()
         self.vars = {}
+        self.rows_w = {}
         self.R = None
         self._style()
         self._head()
@@ -574,11 +575,11 @@ class App(tk.Tk):
         self.nb = ttk.Notebook(body)
         self.nb.pack(side="left", fill="both", expand=True, padx=(8, 8), pady=(0, 8))
         self.tabs = {}
-        for key, name in (("sum", "Итоги"), ("cal", "Календарный план"), ("flow", "Годовые потоки"),
-                          ("sens", "Чувствительность"),
-                          ("mc", "Имитационное моделирование"), ("ev", "Доработка"),
-                          ("tax", "Налоговые расчеты"), ("pick", "Выбор сценария"),
-                          ("chk", "Проверка расчета"), ("rep", "Отчет")):
+        for key, name in (("pick", "Выбор сценария"), ("cal", "Календарный план"),
+                          ("sum", "Показатели эффективности"), ("flow", "Годовые потоки"),
+                          ("tax", "Налоговые расчеты"), ("ev", "Доработка"),
+                          ("mc", "Имитационное моделирование"), ("sens", "Чувствительность"),
+                          ("rep", "Отчет"), ("chk", "Проверка расчета")):
             fr = ttk.Frame(self.nb)
             self.nb.add(fr, text=name)
             self.tabs[key] = fr
@@ -594,6 +595,7 @@ class App(tk.Tk):
         self.rep_sec = {}
         self.rep_depth = tk.StringVar(value="std")
         self.rep_scn = tk.StringVar(value=CA.SCL["TRL5"])
+        self.rep_orient = tk.StringVar(value="land")
         self.run()
 
     def _style(self):
@@ -683,6 +685,7 @@ class App(tk.Tk):
         for w in self.form.winfo_children():
             w.destroy()
         self.vars = {}
+        self.rows_w = {}
         r = 0
         for grp, items in CA.FIELDS:
             lf = ttk.Label(self.form, text=grp.upper(), foreground=MUT, font=("Segoe UI", 8, "bold"))
@@ -699,14 +702,46 @@ class App(tk.Tk):
                 v = self.state_data[key]
                 if kind == "bool":
                     var = tk.BooleanVar(value=bool(v))
-                    ttk.Checkbutton(self.form, variable=var).grid(row=r, column=2, sticky="e", pady=1)
+                    w = ttk.Checkbutton(self.form, variable=var)
+                    w.grid(row=r, column=2, sticky="e", pady=1)
+                elif kind == "sel":
+                    opts = CA.SEL_OPTS[key]
+                    var = tk.StringVar(value=dict(opts).get(v, opts[0][1]))
+                    w = ttk.Combobox(self.form, textvariable=var, width=26, state="readonly",
+                                     values=[name for _, name in opts])
+                    w.grid(row=r, column=2, sticky="e", pady=1)
+                    w.bind("<<ComboboxSelected>>", lambda _e: self.apply_deps())
                 else:
                     var = tk.StringVar(value=self._shown(key, v))
-                    e = ttk.Entry(self.form, textvariable=var, width=14, justify="right")
-                    e.grid(row=r, column=2, sticky="e", pady=1)
+                    w = ttk.Entry(self.form, textvariable=var, width=14, justify="right")
+                    w.grid(row=r, column=2, sticky="e", pady=1)
                 self.vars[key] = var
+                self.rows_w[key] = (self.form.grid_slaves(row=r, column=0)[0], b, w, r)
                 r += 1
         self.form.grid_columnconfigure(0, weight=1)
+        self.apply_deps()
+
+    def apply_deps(self):
+        """Поля шестикритериальной оценки видны только при выборе этого критерия."""
+        for key, (dep_key, dep_val) in CA.DEP.items():
+            if key not in self.rows_w:
+                continue
+            lab, btn, wid, row = self.rows_w[key]
+            cur = self._sel_code(dep_key)
+            if cur == dep_val:
+                lab.grid(row=row, column=0, sticky="w", padx=(2, 2), pady=1)
+                btn.grid(row=row, column=1, sticky="w", padx=(0, 4), pady=1)
+                wid.grid(row=row, column=2, sticky="e", pady=1)
+            else:
+                lab.grid_remove(); btn.grid_remove(); wid.grid_remove()
+
+    def _sel_code(self, key):
+        """Код выбранного значения списочного поля."""
+        name = str(self.vars[key].get())
+        for code, title in CA.SEL_OPTS[key]:
+            if title == name:
+                return code
+        return CA.SEL_OPTS[key][0][0]
 
     # -------------------------------------------------------------- данные
     def read_state(self):
@@ -716,6 +751,9 @@ class App(tk.Tk):
             var = self.vars[key]
             if kind == "bool":
                 self.state_data[key] = bool(var.get())
+                continue
+            if kind == "sel":
+                self.state_data[key] = self._sel_code(key)
                 continue
             raw = str(var.get()).replace(",", ".").strip()
             k = 100.0 if CA.PCT.get(key) else 1.0
@@ -814,8 +852,19 @@ class App(tk.Tk):
             ttk.Radiobutton(c2, text=name, value=k, variable=self.rep_depth).pack(anchor="w")
         ttk.Label(c2, text="Сценарий для графика денежного потока",
                   font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(10, 4))
+        picked = self.picked_scn()
+        if picked:
+            self.rep_scn.set(CA.SCL[picked])
         ttk.Combobox(c2, textvariable=self.rep_scn, state="readonly", width=26,
                      values=[CA.SCL[k] for k in CA.SC]).pack(anchor="w")
+        ttk.Label(c2, text="По умолчанию подставлен сценарий, выбранный по действующему критерию.",
+                  wraplength=420, foreground=MUT, justify="left").pack(anchor="w")
+        ttk.Label(c2, text="Ориентация листа отчета",
+                  font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(10, 4))
+        for k, name in (("port", "Книжная"), ("land", "Альбомная")):
+            ttk.Radiobutton(c2, text=name, value=k, variable=self.rep_orient).pack(anchor="w")
+        ttk.Label(c2, text="Ориентация задает размер страницы и ширину таблиц и графиков отчета.",
+                  wraplength=420, foreground=MUT, justify="left").pack(anchor="w")
         ttk.Label(c2, text=("Прогоны выполнены, в отчет войдут результаты %d прогонов" % self.mc["N"])
                   if self.mc else "Прогоны не выполнялись. Раздел имитационного моделирования "
                                   "войдет в отчет после расчета на вкладке "
@@ -823,6 +872,22 @@ class App(tk.Tk):
                   wraplength=420, foreground=MUT, justify="left").pack(anchor="w", pady=(10, 0))
         ttk.Button(fr, text="Печать отчета", style="Run.TButton",
                    command=self.make_report).pack(anchor="w", padx=10, pady=14)
+
+    def picked_scn(self):
+        """Сценарий, выбранный по действующему критерию."""
+        if not self.R:
+            return None
+        ok = [s for s in ["TRL7", "TRL6", "TRL5"]
+              if min(i["npv"] for i in self.R["scn"][s]["out"]["items"]) - self.R["base"] > 0]
+        if not ok:
+            return "BASE" if self.R["base"] > 0 else None
+        p = self.R["p"]
+        if p.criterion == "crit":
+            opts = CA.crit_options(self.R, ok)
+            return max(opts, key=lambda d: (d["total"], -d["tv"]))["key"]
+        if p.criterion == "reserve":
+            return max(ok, key=lambda s: min(i["npv"] for i in self.R["scn"][s]["out"]["items"]))
+        return max(ok, key=lambda s: self.R["scn"][s]["out"]["E_npv"])
 
     def make_report(self):
         keys = set(k for k, v in self.rep_sec.items() if v.get())
@@ -837,7 +902,8 @@ class App(tk.Tk):
             return
         try:
             RP.build(self.R, self.mc, self.state_data,
-                     dict(depth=self.rep_depth.get(), sections=keys, scn=sel), path)
+                     dict(depth=self.rep_depth.get(), sections=keys, scn=sel,
+                          orient=self.rep_orient.get()), path)
         except Exception as e:
             messagebox.showerror("Отчет", "Отчет не сформирован: %s" % e)
             return
@@ -890,15 +956,19 @@ class App(tk.Tk):
         self.clear(fr)
         h, rows = CA.t_summary(self.R)
         Table(fr, h, rows, widths=[160] + [118] * 7, height=4).pack(fill="x", padx=8, pady=(8, 4))
-        ch = Chart(fr, 820, 250)
+        pair = ttk.Frame(fr)
+        pair.pack(fill="x", padx=8, pady=4)
+        left = ttk.Frame(pair); left.pack(side="left", anchor="n")
+        right = ttk.Frame(pair); right.pack(side="left", anchor="n", padx=(16, 0))
+        ch = Chart(left, 380, 250)
         ch.bars([(CA.SCL[s], self.R["scn"][s]["ind"]["npv"], CA.COL[s]) for s in CA.SC], "ЧДД, млн руб.")
-        ch.pack(anchor="w", padx=8, pady=4)
-        ch2 = Chart(fr, 820, 250)
+        ch.pack(anchor="w")
+        ch2 = Chart(right, 570, 250)
         xs = [r["n"] for r in self.R["scn"]["BASE"]["rows"]]
         ch2.lines(xs, [(CA.SCL[s], CA.COL[s], [r["cumd"] for r in self.R["scn"][s]["rows"]]) for s in CA.SC],
                   str, "Накопленный дисконтированный поток, млн руб.", "год расчетного периода")
-        ch2.pack(anchor="w", padx=8, pady=4)
-        legend(fr, [(CA.SCL[s], CA.COL[s]) for s in CA.SC]).pack(anchor="w", padx=8)
+        ch2.pack(anchor="w")
+        legend(right, [(CA.SCL[s], CA.COL[s]) for s in CA.SC]).pack(anchor="w")
         h2, r2 = CA.t_derived(self.R)
         Table(fr, h2, r2, widths=[320, 140], height=7).pack(fill="x", padx=8, pady=6)
 
@@ -930,17 +1000,13 @@ class App(tk.Tk):
                            "до ввода объекта в эксплуатацию. Совмещение — это часть срока, в которой "
                            "разработка и строительный процесс идут одновременно.",
                   wraplength=900, foreground=MUT, justify="left").pack(anchor="w", padx=8, pady=(2, 6))
-        ch = Chart(fr, 860, 200)
-        ch.gantt([(CA.SCL[s], CA.cal_info(self.R, s)["f"], CA.cal_info(self.R, s)["tv"],
-                   CA.cal_info(self.R, s)["dev"], CA.COL[s]) for s in CA.SC], "лет от начала разработки")
-        ch.pack(anchor="w", padx=8, pady=(0, 2))
         ttk.Label(fr, text="Календарный план сценариев", font=("Segoe UI", 11, "bold")).pack(
             anchor="w", padx=8, pady=(10, 2))
         maxT = max(CA.cal_info(self.R, s_)["tv"] for s_ in CA.SC) * 1.06
         for s_ in CA.SC:
             sch = self.R["scn"][s_]["sch"]
             hh = 44 + (3 if s_ in ("BASE", "TRL7") else 2) * 44 + 26
-            cp = Chart(fr, 860, hh)
+            cp = Chart(fr, 1270, hh)
             cp.calendar_panel(s_, sch, maxT)
             cp.pack(anchor="w", padx=8, pady=(0, 4))
         ttk.Label(fr, text="Верхняя полоса каждой панели — переходы между уровнями готовности технологии, "
@@ -977,7 +1043,7 @@ class App(tk.Tk):
         ch.pack(anchor="w", padx=8, pady=(6, 2))
         legend(fr, [("Инновационные затраты", "#8E44AD"),
                     ("Инвестиционные затраты", "#1B9E77"),
-                    ("Поступления от эксплуатации", "#9fb8cf"),
+                    ("Операционный поток после налога", "#9fb8cf"),
                     ("Накопленный дисконтированный поток", "#003366")]).pack(anchor="w", padx=8)
         ttk.Label(fr, text="Столбцы вниз показывают затраты года, причем инновационные затраты "
                            "включают опытную инфраструктуру, затраты на доработки и затраты "
@@ -1080,7 +1146,7 @@ class App(tk.Tk):
         ttk.Checkbutton(hb, text="сглаженная кривая вместо ступенчатой",
                         variable=self.mc_smooth,
                         command=self.v_mc).grid(row=0, column=1)
-        hs = Chart(fr, 880, 400)
+        hs = Chart(fr, 1020, 400)
         hs.hist(mc["series"], CA.SC, CA.COL, CA.SCL,
                 {s: mc["scn"][s]["neg"] for s in CA.SC}, self.mc_smooth.get())
         hs.pack(anchor="w", padx=8, pady=(2, 2))
@@ -1093,7 +1159,7 @@ class App(tk.Tk):
                             "не было. Вертикальная линия отмечает нулевой доход, пунктир "
                             "и треугольник отмечают медиану сценария."),
                   wraplength=900, foreground=MUT, justify="left").pack(anchor="w", padx=8, pady=(0, 8))
-        cl = Chart(fr, 880, 380)
+        cl = Chart(fr, 1020, 380)
         cl.cloud(mc["series"], mc["rates"], CA.SC, CA.COL, CA.SCL)
         cl.pack(anchor="w", padx=8, pady=(6, 2))
         ttk.Label(fr, text="Каждая точка — один прогон, цвет означает сценарий. Жирные линии "
@@ -1102,20 +1168,14 @@ class App(tk.Tk):
                            "ее точка это медиана фактических прогонов. Для скорости отрисовки "
                            "показана часть прогонов, медианы считаются по всем.",
                   wraplength=900, foreground=MUT, justify="left").pack(anchor="w", padx=8, pady=(0, 8))
-        ch = Chart(fr, 860, 210)
-        ch.ranges([(CA.SCL[s], mc["scn"][s]["p10"], mc["scn"][s]["p50"], mc["scn"][s]["p90"], CA.COL[s])
-                   for s in CA.SC], "млн руб. Точка обозначает медиану, между P10 и P90 находится 80 % исходов")
-        ch.pack(anchor="w", padx=8, pady=6)
         h2, r2 = CA.t_mc_adv(mc)
         ttk.Label(fr, text="Преимущество сценариев интеграции к базовому сценарию",
                   font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=8, pady=(4, 2))
         Table(fr, h2, r2, widths=[150, 110, 120, 110, 160], height=3).pack(fill="x", padx=8)
         h3, r3 = CA.t_mc_d56(mc)
         Table(fr, h3, r3, widths=[380, 110], height=7).pack(fill="x", padx=8, pady=(8, 4))
-        ttk.Label(fr, text="Стандартная погрешность долей при 5 000 прогонов не превышает 0,7 процентного "
-                           "пункта. Расчет выполнен на нормированных данных, поэтому устойчивыми являются "
-                           "порядок сценариев и соотношение долей, а не абсолютные значения вероятностей.",
-                  wraplength=900, foreground=MUT, justify="left").pack(anchor="w", padx=8, pady=(0, 10))
+        ttk.Label(fr, text="Доли оценены с 95-процентным доверительным интервалом, его полуширина при пяти тысячах прогонов не превышает 1,4 процентного пункта.",
+                  wraplength=900, foreground=MUT, justify="left").pack(anchor="w", padx=8, pady=(0, 8))
 
     def _mc_rand_toggle(self):
         self.mc_seed_e.configure(state="readonly" if self.mc_rand.get() else "normal")
@@ -1243,9 +1303,9 @@ class App(tk.Tk):
         ttk.Label(fr, text="Правило выбора. Сценарий проходит допуск, если преимущество к базовому "
                            "сохраняется в наихудшем исходе событий доработки. Из допущенных "
                            "выбирается сценарий по действующему критерию, который задается "
-                           "флажками в разделе «Критерий выбора».", wraplength=900,
+                           "списком в разделе «Критерий выбора».", wraplength=900,
                   foreground=MUT).pack(anchor="w", padx=8, pady=8)
-        if self.R["p"].use_crit:
+        if self.R["p"].criterion == "crit":
             ok = [s for s in ["TRL7", "TRL6", "TRL5"]
                   if min(i["npv"] for i in self.R["scn"][s]["out"]["items"]) - self.R["base"] > 0]
             if ok:
@@ -1279,20 +1339,6 @@ class App(tk.Tk):
         h2, r2, ok2 = CA.t_identities(self.R)
         ttk.Label(fr, text="Проверка расчета на введенных данных",
                   font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=8, pady=(12, 2))
-        ttk.Label(fr, text="Тождество \u2014 равенство, которое обязано выполняться при любых "
-                           "исходных данных, если расчет построен без ошибок. По каждому сценарию "
-                           "проверяются семь таких равенств. Сумма дисконтированных годовых потоков "
-                           "должна совпадать с чистым дисконтированным доходом, накопленный поток "
-                           "последнего года \u2014 с тем же значением, чистый дисконтированный доход "
-                           "при ставке, равной внутренней норме доходности, должен обращаться в ноль, "
-                           "суммы инновационных затрат, признанных расходов на НИОКР и инвестиционных "
-                           "затрат по годам должны совпадать с соответствующими частями бюджета, "
-                           "индекс доходности должен равняться отношению приведенных поступлений "
-                           "к приведенным вложениям. Равенства пересчитываются на тех значениях, "
-                           "которые введены в форме, поэтому проверка действует и после изменения "
-                           "любого параметра. Нарушение любой строки означает ошибку в данных "
-                           "или в расчете.",
-                  wraplength=900, foreground=MUT, justify="left").pack(anchor="w", padx=8, pady=(0, 4))
         Table(fr, h2, r2, widths=[430, 230, 110], height=10).pack(fill="x", padx=8)
 
 

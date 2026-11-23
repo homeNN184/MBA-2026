@@ -116,6 +116,9 @@ b.y{color:var(--ok)} b.n{color:var(--err)}
 #report .rtitle p{margin:0;font-size:13px;color:#c9d8ea}
 body.printing>header,body.printing>.wrap{display:none}
 body.printing #report{display:block;padding:0 10px}
+body.rp-port #report{max-width:720px;margin:0 auto}
+body.rp-land #report{max-width:1080px;margin:0 auto}
+#report svg{width:100%;height:auto}
 #repbar{display:none}
 body.printing #repbar{display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:60;background:#003366;color:#fff;padding:9px 14px;margin:0 0 12px}
 #repbar span{font-size:14px}
@@ -135,6 +138,14 @@ body.printing #repbar{display:flex;align-items:center;gap:12px;position:sticky;t
   #report p,#report .note,#report .concl{font-size:10pt}
   #report .chart{max-height:270px}
 }
+tr.pick td{background:#E2EFDA;font-weight:600}
+.fr.selrow{grid-template-columns:1fr;gap:3px}
+.fr.selrow select{width:100%;padding:4px 6px;border:1px solid #d6d6d0;border-radius:4px;font:13px inherit}
+.gpair{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}
+.gpair>div:first-child{flex:0 0 38%}
+.gpair>div:last-child{flex:1 1 58%}
+.gpair svg{width:100%;height:auto}
+.gfull svg{width:100%;height:auto}
 </style>
 </head>
 <body>
@@ -144,7 +155,7 @@ body.printing #repbar{display:flex;align-items:center;gap:12px;position:sticky;t
 <h1>Модель управления инновационной деятельностью при реализации инвестиционного проекта. Расчет сценариев интеграции</h1>
 <p>Расчет чистого дисконтированного дохода, сроков и устойчивости по четырем сценариям. Суммы в млн руб. в постоянных ценах, время в годах от начала разработки</p>
 </div>
-<div class="hsig">Дипломный проект, версия программы 1.6 от 22.11.2026<br><b>Автор Постаутов К.В.</b></div>
+<div class="hsig">Дипломный проект, версия программы 1.7 от 23.11.2026<br><b>Автор Постаутов К.В.</b></div>
 </div>
 </header>
 <div class="wrap">
@@ -163,16 +174,16 @@ body.printing #repbar{display:flex;align-items:center;gap:12px;position:sticky;t
 </aside>
 <main>
 <nav>
-<div class="tab on" data-t="sum">Итоги</div>
+<div class="tab on" data-t="pick">Выбор сценария</div>
 <div class="tab" data-t="cal">Календарный план</div>
+<div class="tab" data-t="sum">Показатели эффективности</div>
 <div class="tab" data-t="flow">Годовые потоки</div>
-<div class="tab" data-t="sens">Чувствительность</div>
-<div class="tab" data-t="mc">Имитационное моделирование</div>
-<div class="tab" data-t="ev">Доработка</div>
 <div class="tab" data-t="tax">Налоговые расчеты</div>
-<div class="tab" data-t="pick">Выбор сценария</div>
-<div class="tab" data-t="chk">Проверка расчета</div>
+<div class="tab" data-t="ev">Доработка</div>
+<div class="tab" data-t="mc">Имитационное моделирование</div>
+<div class="tab" data-t="sens">Чувствительность</div>
 <div class="tab" data-t="rep">Отчет</div>
+<div class="tab" data-t="chk">Проверка расчета</div>
 </nav>
 <div id="view"></div>
 </main>

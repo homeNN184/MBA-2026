@@ -13,22 +13,22 @@ OUT = "/home/claude/work/fig/prog"
 JS = os.path.join(HERE, "_shots.js")
 
 SHOTS = [
-    ("p01a", "sum", 0, False),
-    ("p01b", "sum", 1, False),
+    ("p01a", "pick", 0, False),
+    ("p01b", "pick", 1, False),
     ("p02a", "cal", 0, False),
     ("p02b", "cal", 1, False),
-    ("p03a", "flow", 0, False),
-    ("p04a", "sens", 0, False),
-    ("p04b", "sens", 1, False),
-    ("p05a", "mc", 0, True),
-    ("p05b", "mc", 1, True),
-    ("p05c", "mc", 3, True),
+    ("p03a", "sum", 0, False),
+    ("p03b", "sum", 1, False),
+    ("p04a", "flow", 0, False),
+    ("p05a", "tax", 0, False),
     ("p06a", "ev", 0, False),
     ("p06b", "ev", 1, False),
-    ("p07a", "pick", 0, False),
-    ("p08a", "chk", 0, False),
-    ("p08b", "chk", 1, False),
+    ("p07a", "mc", 0, True),
+    ("p07b", "mc", 1, True),
+    ("p08a", "sens", 0, False),
     ("p09a", "rep", 0, False),
+    ("p10a", "chk", 0, False),
+    ("p10b", "chk", 1, False),
 ]
 
 script = r"""
@@ -44,8 +44,8 @@ const FILE = %s;
   await pg.goto('file://' + FILE);
   await pg.waitForTimeout(900);
   await pg.evaluate(() => {
-    const e = document.querySelector('#form input[data-key="use_crit"]');
-    if (e) { e.checked = true; e.dispatchEvent(new Event('change', { bubbles: true })); }
+    const e = document.querySelector('#form select[data-key="criterion"]');
+    if (e) { e.value = 'crit'; e.dispatchEvent(new Event('change', { bubbles: true })); }
   });
   await pg.click('#run');
   await pg.waitForTimeout(2500);

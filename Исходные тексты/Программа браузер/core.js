@@ -20,8 +20,8 @@ const DEFAULTS = {
   p_ev:[0.09,0.06,0.04,0.03,0.02], ev_cost:[2.0,5.0,10.0,20.0,30.0], ev_delay_d:[30,30,30,60,90], days:365.0,
   phi_s:[0.40,0.20,0.10], mfix:false, sigma:0.60, pir_share:0.07, pd_part:0.40, exp_share:0.05, exp_days:30.0,
   ev6_cost_abs:null, ev6_delay_abs:null, ev6_p_abs:null,
-  t7_store:0.015, t7_remount:0.06, t7_warr_p:0.25, t7_warr_cost:0.05, prefer_reserve:true,
-  use_crit:false, crit_w:[30,15,15,15,10,15], q_evid:[3,5,4,3], q_load:[5,2,3,3], n_years:40
+  t7_store:0.015, t7_remount:0.06, t7_warr_p:0.25, t7_warr_cost:0.05,
+  criterion:"reserve", crit_w:[30,15,15,15,10,15], q_evid:[3,5,4,3], q_load:[5,2,3,3], n_years:40
 };
 
 function P(ov){
@@ -66,6 +66,8 @@ function schedule(scn,p){
   const d_s = conf_s.map((c,j) => c - start_s[j]);
   return {d_trl:d_s, d_plan:d_trl, conf:conf_s, trl_start:start_s, conf_plan:conf, d_st:d_st, st:st, en:en, f:f, tv:tv, scn:scn};
 }
+/* Число переходов, затраты которых признаются расходами по статье 262 */
+const N_EXP = {BASE:3, TRL5:4, TRL6:5, TRL7:6};
 const pilot_window = sch => [sch.trl_start[4], sch.conf[4]];
 
 function flows(scn,p,delay_days,extra,sch,taxmode){
@@ -82,10 +84,16 @@ function flows(scn,p,delay_days,extra,sch,taxmode){
     for (let k=0;k<p.w_tax.length;k++) s += spread(sch.trl_start[k], sch.conf[k], p.w_tax[k]/100.0*b_inn, n);
     inn_cash.push(s);
   }
+  /* Расходами по статье 262 признаются затраты переходов, завершенных до вовлечения
+     разработки в инвестиционный проект. Затраты последующих переходов формируют
+     первоначальную стоимость объекта и переносятся через амортизацию. */
+  const ne = N_EXP[scn];
   const rec = new Array(N).fill(0.0);
+  let cap_inn = 0.0;
   for (let k=0;k<p.w_tax.length;k++){
-    const y = year_of(sch.conf[k]);
-    if (y <= N) rec[y-1] += p.w_tax[k]/100.0*b_inn;
+    const amt = p.w_tax[k]/100.0*b_inn;
+    if (k < ne){ const y = year_of(sch.conf[k]); if (y <= N) rec[y-1] += amt; }
+    else cap_inn += amt;
   }
   const pilot = new Array(N).fill(0.0);
   if (scn === "BASE" || scn === "TRL7"){
@@ -116,6 +124,14 @@ function flows(scn,p,delay_days,extra,sch,taxmode){
     }
     t7x[year_of(sch.tv)-1] += p.t7_warr_p*p.t7_warr_cost*p.b_inn;
   }
+  /* Первоначальная стоимость объекта: инвестиционная часть, капитализированные инновационные
+     затраты, затраты подтверждения уровней на объекте и прямые затраты доработок. Затраты
+     на опытную инфраструктуру в стоимость объекта не входят, она демонтируется. */
+  const sumArr = a => a.reduce((x,y)=>x+y,0.0);
+  const am_base = (taxmode === "amort")
+    ? (p.b_inv + b_inn + sumArr(t7x) + sumArr(exc))
+    : (p.b_inv + cap_inn + sumArr(t7x) + sumArr(exc));
+
   function opj(j,kind){
     if (j < 1 || j > p.op_years) return 0.0;
     if (kind === "rev")  return p.revenue*load_j(p,j);
@@ -124,8 +140,7 @@ function flows(scn,p,delay_days,extra,sch,taxmode){
     if (kind === "tr")   return p.tr_years.indexOf(j) >= 0 ? p.tr : 0.0;
     if (kind === "kr")   return p.kr_years.indexOf(j) >= 0 ? p.kr : 0.0;
     if (kind === "am"){
-      const bb = (taxmode === "amort") ? (p.b_inv + p.b_inn) : p.b_inv;
-      return j <= p.amort_years ? bb/p.amort_years : 0.0;
+      return j <= p.amort_years ? am_base/p.amort_years : 0.0;
     }
     return 0.0;
   }
@@ -139,7 +154,7 @@ function flows(scn,p,delay_days,extra,sch,taxmode){
     r.rev = cal(n,"rev"); r.opex = cal(n,"opex");
     r.to = cal(n,"to"); r.tr = cal(n,"tr"); r.kr = cal(n,"kr");
     r.toir = r.to + r.tr + r.kr;
-    r.am = cal(n,"am"); r.rnd = (taxmode === "amort") ? 0.0 : rec[n-1];
+    r.am = cal(n,"am"); r.rnd = ((taxmode === "amort") ? 0.0 : rec[n-1]) + r.pilot;
     r.ebitda = r.rev - r.opex - r.toir;
     r.base = r.ebitda - r.am - r.rnd;
     const lim = r.year <= p.loss_limit_end ? p.loss_limit : 1.0;
@@ -374,4 +389,4 @@ function monteCarlo(p,N,seed){
   return mc;
 }
 
-if (typeof module !== "undefined") module.exports = {worstNpv,criticalM,scoreOptions,CRIT_NAMES,P,schedule,flows,npv,npv_at,irr,payback,indicators,outcomes,ev_params,event_scope,pilot_window,monteCarlo,rngMake,mcDraw,mcOne,SCENARIOS,INTEG,SCN_TITLE,TRL_NAMES,STAGE_NAMES,DEFAULTS};
+if (typeof module !== "undefined") module.exports = {N_EXP,worstNpv,criticalM,scoreOptions,CRIT_NAMES,P,schedule,flows,npv,npv_at,irr,payback,indicators,outcomes,ev_params,event_scope,pilot_window,monteCarlo,rngMake,mcDraw,mcOne,SCENARIOS,INTEG,SCN_TITLE,TRL_NAMES,STAGE_NAMES,DEFAULTS};

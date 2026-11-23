@@ -44,8 +44,7 @@ class P:
     loss_limit: float = 0.5
     loss_limit_end: int = 2030                                # последний календарный год ограничения зачета убытков
     first_tax_year: int = 2026
-    prefer_reserve: bool = True                               # критерий выбора: максимум запаса в стресс-сценарии
-    use_crit: bool = False                                    # выбор по шестикритериальной оценке раздела 3.3
+    criterion: str = "reserve"                                # критерий выбора: npv, reserve или crit
     crit_w: tuple = (30.0, 15.0, 15.0, 15.0, 10.0, 15.0)      # веса шести критериев, проценты
     q_evid: tuple = (3, 5, 4, 3)                              # доказательность TRL: базовый, TRL7, TRL6, TRL5
     q_load: tuple = (5, 2, 3, 3)                              # ресурсная нагрузка: 5 — наименьшая
@@ -146,6 +145,10 @@ def schedule(scn, p: P):
                 net_conf=conf_s, scn=scn)
 
 
+# Число переходов, затраты которых признаются расходами по статье 262
+N_EXP = {"BASE": 3, "TRL5": 4, "TRL6": 5, "TRL7": 6}
+
+
 def pilot_window(sch):
     # опытная инфраструктура создается в окне перехода TRL5→6 (инфраструктура для очередного испытания — первой)
     return sch["trl_start"][4], sch["conf"][4]
@@ -166,11 +169,19 @@ def flows(scn, p: P, delay_days=0.0, extra=(), sch=None, taxmode="stage"):
     # плановые затраты
     b_inn = p.b_inn
     inn_cash = [[spread(sch["trl_start"][k], sch["conf"][k], w / 100.0 * b_inn, n) for k, w in enumerate(p.w_tax)] for n in range(1, N + 1)]
-    # налоговое признание инновационных расходов по завершении этапов
+    # Расходами по статье 262 признаются затраты переходов, завершенных до вовлечения
+    # разработки в инвестиционный проект. Затраты последующих переходов формируют
+    # первоначальную стоимость объекта и переносятся через амортизацию.
+    ne = N_EXP[scn]
     rec = [0.0] * N
+    cap_inn = 0.0
     for k, w in enumerate(p.w_tax):
-        y = year_of(sch["conf"][k])
-        if y <= N: rec[y - 1] += w / 100.0 * b_inn
+        amt = w / 100.0 * b_inn
+        if k < ne:
+            y = year_of(sch["conf"][k])
+            if y <= N: rec[y - 1] += amt
+        else:
+            cap_inn += amt
     pilot = [0.0] * N
     if scn in ("BASE", "TRL7"):
         a, b = pilot_window(sch)
@@ -197,6 +208,11 @@ def flows(scn, p: P, delay_days=0.0, extra=(), sch=None, taxmode="stage"):
                 for n in range(1, N + 1):
                     t7x[n - 1] += spread(a, b, p.t7_store * p.b_inn * lag, n)
         t7x[year_of(sch["tv"]) - 1] += p.t7_warr_p * p.t7_warr_cost * p.b_inn
+    # Первоначальная стоимость объекта: инвестиционная часть, капитализированные
+    # инновационные затраты, затраты подтверждения уровней и прямые затраты доработок.
+    # Опытная инфраструктура в стоимость объекта не входит, она демонтируется.
+    am_base = (p.b_inv + b_inn + sum(t7x) + sum(exc)) if taxmode == "amort" \
+        else (p.b_inv + cap_inn + sum(t7x) + sum(exc))
     # эксплуатация: по годам эксплуатации j
     def opj(j, kind):
         if j < 1 or j > p.op_years: return 0.0
@@ -206,8 +222,7 @@ def flows(scn, p: P, delay_days=0.0, extra=(), sch=None, taxmode="stage"):
         if kind == "tr": return p.tr if j in p.tr_years else 0.0
         if kind == "kr": return p.kr if j in p.kr_years else 0.0
         if kind == "am":
-            bb = (p.b_inv + p.b_inn) if taxmode == "amort" else p.b_inv
-            return bb / p.amort_years if j <= p.amort_years else 0.0
+            return am_base / p.amort_years if j <= p.amort_years else 0.0
     def cal(n, kind):
         j = n - m
         return (1 - phi) * opj(j, kind) + phi * opj(j - 1, kind)
@@ -227,7 +242,7 @@ def flows(scn, p: P, delay_days=0.0, extra=(), sch=None, taxmode="stage"):
         r["to"] = cal(n, "to"); r["tr"] = cal(n, "tr"); r["kr"] = cal(n, "kr")
         r["toir"] = r["to"] + r["tr"] + r["kr"]
         r["am"] = cal(n, "am")
-        r["rnd"] = 0.0 if taxmode == "amort" else rec[n - 1]
+        r["rnd"] = (0.0 if taxmode == "amort" else rec[n - 1]) + r["pilot"]
         r["ebitda"] = r["rev"] - r["opex"] - r["toir"]
         r["base"] = r["ebitda"] - r["am"] - r["rnd"]
         lim = p.loss_limit if r["year"] <= p.loss_limit_end else 1.0

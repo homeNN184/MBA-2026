@@ -9,15 +9,15 @@ const COL = { BASE: C[0], TRL7: C[1], TRL6: C[2], TRL5: C[3] };
    h — расширенная подсказка. */
 const FIELDS = [
   ["Критерий выбора", [
-    { k: "prefer_reserve", l: "Приоритет запаса в стресс-сценарии", t: "bool",
-      h: "При включении выбирается наибольший остаток преимущества при всех доработках. При выключении выбирается наибольший ожидаемый ЧДД. Флажок действует, пока выключена критериальная оценка." },
-    { k: "use_crit", l: "Критериальная оценка", t: "bool",
-      h: "При включении выбор делается по шестикритериальной оценке раздела 3.3 работы среди базового варианта и допущенных сценариев, а флажок приоритета запаса не действует. Параметры оценки задаются тремя следующими полями и влияют на результат." },
-    { k: "crit_w", l: "Веса шести критериев, %", t: "vec",
+    { k: "criterion", l: "Критерий выбора сценария", t: "sel",
+      opts: [["npv", "Наибольший ожидаемый ЧДД"], ["reserve", "Наибольший запас в стресс-сценарии"],
+             ["crit", "Шестикритериальная оценка"]],
+      h: "Правило выбора среди допущенных сценариев. Наибольший ожидаемый ЧДД отвечает ориентации на доход. Наибольший запас в стресс-сценарии отвечает ограничению потерь в наихудшем исходе, когда доработка происходит на каждом уровне после входа. Шестикритериальная оценка применяет правило раздела 3.3 работы и учитывает одновременно доход, срок ввода, запас, доказательность уровня готовности, ресурсную нагрузку и устойчивость. Три следующих поля действуют только при третьем значении." },
+    { k: "crit_w", l: "Веса шести критериев, %", t: "vec", dep: "crit",
       h: "Порядок весов следующий: ЧДД, срок ввода, остаток преимущества в наихудшем исходе, доказательность TRL, ресурсная нагрузка, запас устойчивости. Сумма должна равняться 100 %. Базовые веса 30, 15, 15, 15, 10 и 15 приняты в разделе 3.3 работы, наибольший вес отдан ЧДД, а устойчивость учтена двумя критериями по 15 %." },
-    { k: "q_evid", l: "Доказательность TRL по вариантам, от 1 до 5", t: "vec",
+    { k: "q_evid", l: "Доказательность TRL по вариантам, от 1 до 5", t: "vec", dep: "crit",
       h: "Экспертная оценка для базового варианта, входа на TRL7, TRL6 и TRL5, где 5 соответствует наилучшему значению. Оценка 5 означает, что уровни TRL1–TRL7 подтверждены на опытной инфраструктуре до начала проектирования, а TRL8 и TRL9 подтверждены на самом объекте. Оценка 4 означает начало проектирования по зафиксированной конфигурации с подтверждением высших уровней на объекте. Оценка 3 означает проектирование по незафиксированной конфигурации либо подтверждение TRL9 на демонтируемой опытной инфраструктуре, когда оборудование, передаваемое в эксплуатацию, заново не подтверждается." },
-    { k: "q_load", l: "Ресурсная нагрузка по вариантам, от 1 до 5", t: "vec",
+    { k: "q_load", l: "Ресурсная нагрузка по вариантам, от 1 до 5", t: "vec", dep: "crit",
       h: "Экспертная оценка потребности в ресурсах и управленческом внимании для базового варианта, входа на TRL7, TRL6 и TRL5, где 5 соответствует наименьшей нагрузке. Оценка 5 отвечает последовательной организации работ без параллельных потоков. Оценка 3 отвечает параллельному выполнению разработки и строительства без опытной инфраструктуры. Оценка 2 отвечает параллельному выполнению вместе с опытной инфраструктурой, демонтажем, перевозкой и повторным монтажом оборудования на объекте." }
   ]],
   ["Бюджет, сроки и ставка", [
@@ -159,7 +159,7 @@ function buildForm() {
   FIELDS.forEach(([grp, items]) => {
     box.appendChild(el("h3", null, grp));
     items.forEach(f => {
-      const row = el("div", { class: "fr" });
+      const row = el("div", { class: f.t === "sel" ? "fr selrow" : "fr" });
       const lb = el("label", null, f.l + " ");
       lb.setAttribute("for", "f_" + f.k);
       lb.appendChild(helpIcon(f));
@@ -167,19 +167,38 @@ function buildForm() {
       if (f.t === "bool") {
         inp = el("input", { type: "checkbox", id: "f_" + f.k });
         inp.checked = !!STATE[f.k];
+      } else if (f.t === "sel") {
+        inp = el("select", { id: "f_" + f.k });
+        f.opts.forEach(([v, lab]) => {
+          const o = el("option", { value: v }, lab);
+          if (STATE[f.k] === v) o.selected = true;
+          inp.appendChild(o);
+        });
+        inp.onchange = () => applyDeps();
       } else {
         inp = el("input", { type: "text", id: "f_" + f.k, inputmode: "decimal" });
-        inp.value = f.t === "bool" ? (STATE[f.k] ? "Да" : "Нет") : toShow(f, STATE[f.k]);
+        inp.value = toShow(f, STATE[f.k]);
       }
       inp.dataset.key = f.k;
+      if (f.dep) row.dataset.dep = f.dep;
       row.appendChild(lb); row.appendChild(inp);
       box.appendChild(row);
     });
   });
+  applyDeps();
 }
 
 const FMAP = {};
 FIELDS.forEach(([, items]) => items.forEach(f => FMAP[f.k] = f));
+
+/* Поля шестикритериальной оценки видны только при выборе соответствующего критерия. */
+function applyDeps() {
+  const sel = document.getElementById("f_criterion");
+  const cur = sel ? sel.value : STATE.criterion;
+  document.querySelectorAll("#form .fr[data-dep]").forEach(row => {
+    row.style.display = row.dataset.dep === cur ? "" : "none";
+  });
+}
 
 function parseField(raw) {
   const value = raw.trim().replace(",", ".");
@@ -188,9 +207,10 @@ function parseField(raw) {
 
 function readForm() {
   const candidate = { ...STATE };
-  for (const input of document.querySelectorAll("#form input")) {
+  for (const input of document.querySelectorAll("#form input, #form select")) {
     const f = FMAP[input.dataset.key];
     if (f.t === "bool") { candidate[f.k] = input.checked; continue; }
+    if (f.t === "sel") { candidate[f.k] = input.value; continue; }
     const vector = f.t.startsWith("vec");
     const numbers = (vector ? input.value.split(";") : [input.value]).map(parseField);
     const values = numbers.map(x => f.p ? x / 100 : x);
@@ -204,6 +224,11 @@ function validateInputs(input) {
     const value = input[key], f = FMAP[key], label = f ? f.l : key;
     if (typeof original === "boolean") {
       if (typeof value !== "boolean") throw Error(label + " — требуется логическое значение");
+      continue;
+    }
+    if (typeof original === "string") {
+      const allowed = (f && f.opts) ? f.opts.map(o => o[0]) : [original];
+      if (!allowed.includes(value)) throw Error(label + " — выберите значение из списка");
       continue;
     }
     if (original === null && value === null) continue;
@@ -446,6 +471,7 @@ function table(head, rows, cls) {
   const tb = el("tbody");
   rows.forEach(r => {
     const x = el("tr");
+    if (r.__pick) x.className = "pick";
     r.forEach((c, i) => {
       const td = el("td", { class: i ? "n" : "" });
       if (c && c.html !== undefined) td.innerHTML = c.html; else td.textContent = c;
@@ -481,14 +507,18 @@ function vSum(box) {
   });
   box.appendChild(card("Показатели эффективности сценариев",
     table(["Сценарий", "ЧДД, млн руб.", "ИД", "ВНД, %", "Срок окупаемости, лет", "Дисконтированный срок, лет", "Срок ввода, лет", "Преимущество к базовому, млн руб."], rows, "wide")));
-  const c1 = card("Чистый дисконтированный доход по сценариям",
-    barChart(SC.map(s => ({ k: SCL[s], v: R.scn[s].ind.npv, c: COL[s] })), "", "млн руб."));
-  box.appendChild(c1);
   const xs = R.scn.BASE.rows.map(r => r.n);
-  box.appendChild(card("Накопленный дисконтированный поток",
-    lineChart(xs, SC.map(s => ({ k: SCL[s], c: COL[s], v: R.scn[s].rows.map(r => r.cumd) })),
-      "", "год расчетного периода", "млн руб.", x => String(x), { labels: false, dots: false })));
-  box.lastChild.appendChild(legend(SC.map(s => ({ k: SCL[s], c: COL[s] }))));
+  const g1 = el("div");
+  g1.appendChild(el("h3", null, "Чистый дисконтированный доход по сценариям"));
+  g1.appendChild(barChart(SC.map(s => ({ k: SCL[s], v: R.scn[s].ind.npv, c: COL[s] })), "", "млн руб."));
+  const g2 = el("div");
+  g2.appendChild(el("h3", null, "Накопленный дисконтированный поток"));
+  g2.appendChild(lineChart(xs, SC.map(s => ({ k: SCL[s], c: COL[s], v: R.scn[s].rows.map(r => r.cumd) })),
+    "", "год расчетного периода", "млн руб.", x => String(x), { labels: false, dots: false }));
+  g2.appendChild(legend(SC.map(s => ({ k: SCL[s], c: COL[s] }))));
+  const pair = el("div", { class: "gpair" });
+  pair.appendChild(g1); pair.appendChild(g2);
+  box.appendChild(card(null, pair));
   const d = [["Инновационная часть бюджета, млн руб.", nf(p.b_inn, 1)],
     ["Инвестиционная часть бюджета, млн руб.", nf(p.b_inv, 1)],
     ["Опытная инфраструктура, млн руб.", nf(p.pilot, 1)],
@@ -643,17 +673,11 @@ function vCal(box) {
   box.appendChild(c0);
   /* диаграмма */
   const maxT = Math.max(...SC.map(s => R.scn[s].sch.tv)) * 1.06;
-  const cg = card("Сроки реализации по сценариям",
-    ganttChart(SC.map(s => { const d = info(s);
-      return { k: SCL[s], f: d.sch.f, tv: d.sch.tv, dev: d.dev, c: COL[s] }; }), maxT));
-  const wcal = el("div");
+  const wcal = el("div", { class: "gfull" });
   SC.forEach(k => wcal.appendChild(calendarPanel(k, maxT)));
   wcal.appendChild(el("p", { class: "note" },
     "Верхняя полоса каждой панели — переходы между уровнями готовности технологии, ромб отмечает подтверждение уровня. Средняя полоса — стадии строительства: ИД — исходные данные, ПД — проектная документация, РД — рабочая документация, МТР — поставка материально-технических ресурсов, СМР — строительно-монтажные работы, ПНР хх — пусконаладочные работы без нагрузки, ПНР нагр. — под нагрузкой, КО — комплексное опробование. Нижняя полоса показывает опытную инфраструктуру там, где она создается. Штриховая область отмечает продолжение подтверждения уровня на стадиях строительства. Красная пунктирная линия — вход в проектирование, черная штриховая — ввод объекта. Время в годах от начала разработки."));
   box.appendChild(card("Календарный план сценариев", wcal));
-  cg.appendChild(el("p", { class: "note" },
-    "Светлая часть полосы — время до входа в инвестиционный процесс, насыщенная часть — строительный процесс, вертикальный штрих — окончание разработки инновационного продукта."));
-  box.appendChild(cg);
   /* по каждому сценарию */
   SC.forEach(s => {
     const d = info(s), sch = d.sch;
@@ -708,7 +732,7 @@ function vFlow(box) {
   g.appendChild(flowChart(rr, ""));
   g.appendChild(legend([{ k: "Инновационные затраты", c: COL.TRL6 },
                         { k: "Инвестиционные затраты", c: COL.TRL5 },
-                        { k: "Поступления от эксплуатации", c: "#9fb8cf" },
+                        { k: "Операционный поток после налога", c: "#9fb8cf" },
                         { k: "Накопленный дисконтированный поток", c: "#003366" }]));
   g.appendChild(el("p", { class: "note" },
     "Столбцы вниз показывают затраты года, причем инновационные затраты включают опытную инфраструктуру, "
@@ -862,18 +886,21 @@ function decision(R) {
     const reason = expected <= 0 ? "Ожидаемый ЧДД ≤ 0" : reserve <= 0 ? "Стресс-запас ≤ 0" : "Допущен";
     return {key, expected, stress, reserve, reason};
   });
-  const metric = R.p.prefer_reserve ? "reserve" : "expected";
-  const eligible = rows.filter(r => r.reason === "Допущен").sort((a,b) =>
-    b[metric]-a[metric] || R.scn[a.key].sch.tv-R.scn[b.key].sch.tv);
-  if (R.p.use_crit) {
+  const mode = R.p.criterion;
+  if (mode === "crit") {
     const opts = criteriaTable(R, rows);
     const best = opts.slice().sort((a,b) => b.total-a.total || a.tv-b.tv)[0];
-    return {rows, opts, criterion: "Максимум шестикритериальной оценки",
-            result: best ? best.label : "Экономически допустимый сценарий не найден"};
+    return {rows, opts, mode, criterion: "Максимум шестикритериальной оценки",
+            result: best ? best.label : "Экономически допустимый сценарий не найден",
+            bestKey: best ? best.key : null};
   }
-  const criterion = R.p.prefer_reserve ? "Максимум стресс-запаса" : "Максимум ожидаемого ЧДД";
+  const metric = mode === "reserve" ? "reserve" : "expected";
+  const eligible = rows.filter(r => r.reason === "Допущен").sort((a,b) =>
+    b[metric]-a[metric] || R.scn[a.key].sch.tv-R.scn[b.key].sch.tv);
+  const criterion = mode === "reserve" ? "Максимум стресс-запаса" : "Максимум ожидаемого ЧДД";
+  const bestKey = eligible.length ? eligible[0].key : (R.base > 0 ? "BASE" : null);
   const result = eligible.length ? SCL[eligible[0].key] : R.base > 0 ? "Базовый сценарий" : "Экономически допустимый сценарий не найден";
-  return {rows, criterion, result};
+  return {rows, mode, criterion, result, bestKey};
 }
 /* Шестикритериальная оценка раздела 3.3. В оценке участвуют базовый вариант
    и допущенные сценарии интеграции. Запас устойчивости базового варианта принят
@@ -896,11 +923,17 @@ function criteriaTable(R, rows) {
 }
 function vPick(box) {
   const d=decision(RES), w=el("div");
-  w.appendChild(el("p",{class:"concl"}, d.criterion + ". Результат выбора — " + d.result + "."));
-  w.appendChild(table(["Вариант","Ввод, лет","Ожидаемый ЧДД","Стресс-ЧДД","Запас к базе","Допуск"],
-    d.rows.map(r=>[SCL[r.key],nf(RES.scn[r.key].sch.tv,2),nf(r.expected,2),nf(r.stress,2),nf(r.reserve,2),r.reason]),"wide"));
-  w.appendChild(el("p",{class:"note"},"Суммы в млн руб. Допуск требует положительного ожидаемого ЧДД и положительного запаса к базе во всех сочетаниях доработок. Стресс включает даже события с заданной нулевой вероятностью. При равенстве критерия предпочтителен более ранний ввод."));
-  box.appendChild(card("Выбор сценария",w));
+  const head = el("p",{class:"concl"}, "Критерий выбора — " + d.criterion
+    + ". Результат выбора — " + d.result + ".");
+  w.appendChild(head);
+  const rows = d.rows.map(r=>{
+    const row=[SCL[r.key],nf(RES.scn[r.key].sch.tv,2),nf(r.expected,2),nf(r.stress,2),nf(r.reserve,2),r.reason];
+    if (r.key === d.bestKey) row.__pick = true;
+    return row;
+  });
+  w.appendChild(table(["Вариант","Ввод, лет","Ожидаемый ЧДД","Стресс-ЧДД","Запас к базе","Допуск"],rows,"wide"));
+  w.appendChild(el("p",{class:"note"},"Суммы в млн руб. Цветом отмечен выбранный вариант. Допуск требует положительного ожидаемого ЧДД и положительного запаса к базе во всех сочетаниях доработок. Стресс включает даже события с заданной нулевой вероятностью. При равенстве критерия предпочтителен более ранний ввод."));
+  box.appendChild(card("Допуск сценариев",w));
   if (d.opts) box.appendChild(card("Шестикритериальная оценка", critCard(d)));
 }
 /* Карточка шестикритериальной оценки: исходные величины, баллы и взвешенный итог. */
@@ -908,11 +941,14 @@ function critCard(d) {
   const w = el("div");
   const names = MODEL.CRIT_NAMES;
   const wts = RES.p.crit_w;
+  w.appendChild(el("p",{class:"concl"},"Результат выбора — " + d.result + "."));
   w.appendChild(table(["Вариант","ЧДД, млн руб.","Ввод, лет","Остаток, млн руб.","Доказательность","Нагрузка","Запас m*"],
-    d.opts.map(o=>[o.label,nf(o.npv,1),nf(o.tv,2),nf(o.worst,1),nf(o.qe,0),nf(o.qr,0),nf(o.m,3)]),"wide"));
+    d.opts.map(o=>{const r=[o.label,nf(o.npv,1),nf(o.tv,2),nf(o.worst,1),nf(o.qe,0),nf(o.qr,0),nf(o.m,3)];
+      if (o.key === d.bestKey) r.__pick = true; return r;}),"wide"));
   w.appendChild(el("p",{class:"note"},"Исходные величины оценки. Остаток базового варианта принят равным нулю, запас устойчивости базового варианта принят наибольшим среди вариантов, поскольку доработок в нем нет."));
   w.appendChild(table(["Вариант"].concat(names.map((n,i)=>n+", вес "+nf(wts[i],0)+" %")).concat(["Оценка S"]),
-    d.opts.map(o=>[o.label].concat(o.score.map(x=>nf(x,1))).concat([nf(o.total,2)])),"wide"));
+    d.opts.map(o=>{const r=[o.label].concat(o.score.map(x=>nf(x,1))).concat([nf(o.total,2)]);
+      if (o.key === d.bestKey) r.__pick = true; return r;}),"wide"));
   w.appendChild(el("p",{class:"note"},"Количественные критерии нормированы линейно по наилучшему и наихудшему значению среди вариантов, для срока ввода нормировка обращена. Экспертные оценки переведены в баллы по формуле, в которой из оценки вычитается единица и результат делится на четыре. Оценка S является взвешенной суммой баллов."));
   return w;
 }
@@ -941,7 +977,7 @@ function taxBars(T) {
   const W = 680, H = 300, L = 74, Rr = 20, Tp = 34, B = 58;
   const s = svgBox(W, H);
   s.appendChild(sv("text", { x: 0, y: 16, class: "ct" },
-    "Чистый дисконтированный доход при двух порядках налогового признания"));
+    "Чистый дисконтированный доход при двух порядках учета инновационных затрат"));
   let hi = 0;
   SC.forEach(k => { hi = Math.max(hi, T[k].npvA, T[k].npvB); });
   hi *= 1.25;
@@ -966,7 +1002,7 @@ function taxBars(T) {
       "text-anchor": "middle" }, SCL[k]));
   });
   s.appendChild(sv("text", { x: 0, y: H - 6, class: "ax" },
-    "млн руб. Левый столбец — поэтапное признание, правый (светлый) — признание через амортизацию"));
+    "млн руб. Левый столбец — принятый порядок, правый (светлый) — полная капитализация"));
   return s;
 }
 function taxYears(T, key) {
@@ -999,7 +1035,7 @@ function taxYears(T, key) {
     s.appendChild(sv("text", { x: x(yr), y: H - B + 18, class: "ax", "text-anchor": "middle" }, String(yr)));
   }
   s.appendChild(sv("text", { x: 0, y: H - 6, class: "ax" },
-    "млн руб. Сплошная линия — поэтапное признание, штриховая — признание через амортизацию"));
+    "млн руб. Сплошная линия — принятый порядок, штриховая — полная капитализация"));
   return s;
 }
 function vTax(box) {
@@ -1017,12 +1053,12 @@ function vTax(box) {
   const r2 = SC.map(k => [SCL[k], nf(T[k].npvA, 1), nf(T[k].npvB, 1), nf(T[k].npvB - T[k].npvA, 1),
     nf(T[k].pvA, 1), nf(T[k].pvB, 1), nf(T[k].pvB - T[k].pvA, 1), nf(T[k].taxA, 1),
     String(T[k].y1A) + " / " + String(T[k].y1B)]);
-  w.appendChild(el("h4", {}, "Сравнение двух порядков налогового признания инновационных затрат"));
-  w.appendChild(table(["Сценарий", "ЧДД, поэтапно", "ЧДД, амортизация", "Изменение ЧДД",
-    "Приведенный налог, поэтапно", "Приведенный налог, амортизация", "Изменение приведенного налога",
-    "Налог за горизонт", "Первый год налога, поэтапно / амортизация"], r2, "wide"));
+  w.appendChild(el("h4", {}, "Сравнение принятого порядка с полной капитализацией"));
+  w.appendChild(table(["Сценарий", "ЧДД, принятый порядок", "ЧДД, полная капитализация", "Изменение ЧДД",
+    "Приведенный налог, принятый порядок", "Приведенный налог, полная капитализация", "Изменение приведенного налога",
+    "Налог за горизонт", "Первый год налога, принятый порядок / полная капитализация"], r2, "wide"));
   w.appendChild(el("p", { class: "note" },
-    "Поэтапное признание означает, что затраты на разработку уменьшают налоговую базу в году подтверждения уровня готовности пропорционально доле затрат этапа. Признание через амортизацию означает, что те же затраты включаются в стоимость объекта и списываются линейно после ввода в эксплуатацию. Сравнение приведенного налога корректно только внутри одного сценария, где выручка, сроки и капитальные вложения не меняются."));
+    "Принятый порядок означает, что расходами признаются затраты переходов, завершенных до вовлечения разработки в инвестиционный проект, а затраты последующих переходов вместе с затратами подтверждения уровней и доработок формируют первоначальную стоимость объекта. Полная капитализация означает, что в стоимость объекта включаются все инновационные затраты. Сравнение приведенного налога корректно только внутри одного сценария, где выручка, сроки и капитальные вложения не меняются."));
 
   w.appendChild(taxBars(T));
   const sel = el("select", { class: "sel" });
@@ -1039,7 +1075,7 @@ function vTax(box) {
   draw();
 
   w.appendChild(el("p", { class: "concl" },
-    "Номинальная сумма налога за горизонт расчета одинакова во всех сценариях и при обоих порядках признания, поэтому интеграция налоговой экономии не создает. Внутри одного сценария изменение ЧДД в точности равно изменению приведенного налога, то есть поздний вычет переносит налог ближе к началу эксплуатации и снижает доход. Между сценариями приведенный налог растет вместе с прибылью от более раннего ввода объекта, и прирост приведенной прибыли до налога превышает прирост налога, поэтому ЧДД растет."));
+    "Номинальная сумма налога за горизонт расчета различается по сценариям, поскольку доля затрат, признаваемых расходами, зависит от точки входа, а амортизируемая стоимость объекта зависит от капитализированных затрат. Внутри одного сценария изменение ЧДД в точности равно изменению приведенного налога, то есть поздний вычет переносит налог ближе к началу эксплуатации и снижает доход. Между сценариями приведенный налог растет вместе с прибылью от более раннего ввода объекта, и прирост приведенной прибыли до налога превышает прирост налога, поэтому ЧДД растет."));
   box.appendChild(card("Налоговые расчеты", w));
 }
 function vChk(box) {
@@ -1048,32 +1084,30 @@ function vChk(box) {
   const no = v => ({ html: "<b class='n'>нарушено</b>" });
   const mark = c => c ? ok() : no();
   let bad = 0;
-  const add = (rows, name, cond, fact) => { if (!cond) bad++; rows.push([name, fact, mark(cond)]); };
+  const add = (rows, name, cond) => { if (!cond) bad++; rows.push([name, mark(cond)]); };
 
   /* 1. введенные данные */
   const r1 = [];
   Object.keys(SUM100).forEach(k => {
     const a = STATE[k], s = a.reduce((x, y) => x + y, 0);
-    add(r1, "Сумма поля «" + FMAP[k].l + "» равна 100 %", Math.abs(s - 100) <= 0.01, num2s(s) + " %");
+    add(r1, "Сумма поля «" + FMAP[k].l + "» равна 100 %", Math.abs(s - 100) <= 0.01);
   });
   add(r1, "Оценки доказательности и нагрузки в пределах от 1 до 5",
-    STATE.q_evid.concat(STATE.q_load).every(x => x >= 1 && x <= 5),
-    STATE.q_evid.join("; ") + " и " + STATE.q_load.join("; "));
+    STATE.q_evid.concat(STATE.q_load).every(x => x >= 1 && x <= 5));
   add(r1, "Доля инновационной части в пределах от 0 до 100 %",
-    p.share_inn > 0 && p.share_inn < 1, num2s(p.share_inn * 100) + " %");
-  add(r1, "Ставка дисконтирования положительна", p.rate > 0, num2s(p.rate * 100) + " % годовых");
+    p.share_inn > 0 && p.share_inn < 1);
+  add(r1, "Ставка дисконтирования положительна", p.rate > 0);
   add(r1, "Предел зачета убытка в пределах от 0 до 100 %",
-    p.loss_limit >= 0 && p.loss_limit <= 1, num2s(p.loss_limit * 100) + " %");
+    p.loss_limit >= 0 && p.loss_limit <= 1);
   const tvmax = Math.max(...SC.map(s => R.scn[s].sch.tv));
   add(r1, "Расчетный период вмещает срок ввода и срок эксплуатации",
-    Math.ceil(tvmax) + p.op_years <= p.n_years,
-    "нужно не менее " + (Math.ceil(tvmax) + p.op_years) + " лет, задано " + p.n_years);
+    Math.ceil(tvmax) + p.op_years <= p.n_years);
   add(r1, "Число лет загрузки не превышает срок эксплуатации",
-    p.load.length <= p.op_years, "лет загрузки " + p.load.length + ", срок эксплуатации " + p.op_years);
+    p.load.length <= p.op_years);
   add(r1, "Срок амортизации не превышает срок эксплуатации",
-    p.amort_years <= p.op_years, "амортизация " + p.amort_years + " лет, эксплуатация " + p.op_years);
+    p.amort_years <= p.op_years);
   add(r1, "Вероятности событий в пределах от 0 до 100 %",
-    p.p_ev.every(v => v >= 0 && v <= 1), p.p_ev.map(v => num2s(v * 100)).join("; ") + " %");
+    p.p_ev.every(v => v >= 0 && v <= 1));
 
   /* 2. расчет на текущих данных */
   const r2 = [];
@@ -1082,33 +1116,35 @@ function vChk(box) {
     const sum = k => rows.reduce((a, x) => a + x[k], 0);
     const near = (a, b, tol) => Math.abs(a - b) <= tol;
     add(r2, SCL[s] + ". Сумма дисконтированных потоков равна ЧДД",
-      near(sum("pv"), i.npv, 1e-6), nf(sum("pv"), 4) + " и " + nf(i.npv, 4));
+      near(sum("pv"), i.npv, 1e-6));
     add(r2, SCL[s] + ". Накопленный поток последнего года равен ЧДД",
-      near(rows[rows.length - 1].cumd, i.npv, 1e-6), nf(rows[rows.length - 1].cumd, 4));
-    if (i.irr === null) r2.push([SCL[s] + ". ВНД", "Корень не определен в интервале поиска", "—"]);
+      near(rows[rows.length - 1].cumd, i.npv, 1e-6));
+    if (i.irr === null) r2.push([SCL[s] + ". ВНД, корень не определен в интервале поиска", "—"]);
     else add(r2, SCL[s] + ". ЧДД при ставке, равной ВНД, обращается в ноль",
-      near(MODEL.npv_at(rows, i.irr), 0, 1e-6), nf(MODEL.npv_at(rows, i.irr), 6));
+      near(MODEL.npv_at(rows, i.irr), 0, 1e-6));
     add(r2, SCL[s] + ". Сумма инновационных затрат равна инновационной части бюджета",
-      near(sum("inn"), p.b_inn, 1e-6), nf(sum("inn"), 4) + " и " + nf(p.b_inn, 4));
-    add(r2, SCL[s] + ". Сумма признанных расходов на НИОКР равна инновационной части",
-      near(sum("rnd"), p.b_inn, 1e-6), nf(sum("rnd"), 4));
+      near(sum("inn"), p.b_inn, 1e-6));
+    const expInn = p.w_tax.slice(0, MODEL.N_EXP[s]).reduce((a, w) => a + w, 0) / 100 * p.b_inn;
+    const amBase = p.b_inv + (p.b_inn - expInn) + sum("t7x") + sum("rework");
+    add(r2, SCL[s] + ". Признанные расходы равны расходам на НИОКР до входа и опытной инфраструктуре",
+      near(sum("rnd"), expInn + sum("pilot"), 1e-6));
+    add(r2, SCL[s] + ". Сумма амортизации равна первоначальной стоимости объекта",
+      near(sum("am"), amBase, 1e-6));
     add(r2, SCL[s] + ". Сумма инвестиционных затрат равна инвестиционной части бюджета",
-      near(sum("inv"), p.b_inv, 1e-6), nf(sum("inv"), 4) + " и " + nf(p.b_inv, 4));
+      near(sum("inv"), p.b_inv, 1e-6));
     add(r2, SCL[s] + ". Индекс доходности равен отношению приведенных величин",
-      near(i.pi, i.pv_cf / i.pv_ic, 1e-9), nf(i.pi, 6));
+      near(i.pi, i.pv_cf / i.pv_ic, 1e-9));
   });
 
   const w1 = el("div");
   w1.appendChild(el("p", { class: bad ? "err" : "concl" }, bad
     ? "Нарушено условий: " + bad + ". Проверьте отмеченные строки."
     : "Все условия выполнены на введенных данных."));
-  w1.appendChild(table(["Условие", "Фактически", "Результат"], r1, "wide"));
+  w1.appendChild(table(["Условие", "Результат"], r1, "wide"));
   box.appendChild(card("Проверка введенных данных", w1));
 
   const w2 = el("div");
-  w2.appendChild(el("p", { class: "note" },
-    "Тождество \u2014 равенство, которое обязано выполняться при любых исходных данных, если расчет построен без ошибок. По каждому сценарию проверяются семь таких равенств. Сумма дисконтированных годовых потоков должна совпадать с чистым дисконтированным доходом, накопленный поток последнего года \u2014 с тем же значением, чистый дисконтированный доход при ставке, равной внутренней норме доходности, должен обращаться в ноль, суммы инновационных затрат, признанных расходов на НИОКР и инвестиционных затрат по годам должны совпадать с соответствующими частями бюджета, индекс доходности должен равняться отношению приведенных поступлений к приведенным вложениям. Равенства пересчитываются на тех значениях, которые введены в форме, поэтому проверка действует и после изменения любого параметра. Нарушение любой строки означает ошибку в данных или в расчете."));
-  w2.appendChild(table(["Условие", "Фактически", "Результат"], r2, "wide"));
+  w2.appendChild(table(["Условие", "Результат"], r2, "wide"));
   box.appendChild(card("Проверка расчета на введенных данных", w2));
 
 }
@@ -1128,7 +1164,7 @@ const REP_SECTIONS = [
   ["tax", "Налоговые расчеты"],
   ["pick", "Выбор сценария"]
 ];
-const REPSEL = { depth: "std", scn: "TRL6", sections: {} };
+const REPSEL = { depth: "std", scn: "TRL6", sections: {}, orient: "land" };
 const REP_DEPTHS = [
   ["short", "Кратко. Только графики и итоговые таблицы"],
   ["std", "Стандартно. Графики и основные таблицы"],
@@ -1175,10 +1211,26 @@ function vRep(box) {
     c2.appendChild(lb);
   });
   c2.appendChild(el("h4", null, "Сценарий для графика денежного потока"));
+  /* при переходе на вкладку сценарий берется из результата выбора */
+  const picked = decision(RES).bestKey;
+  if (picked && SC.includes(picked)) REPSEL.scn = picked;
   const sel = el("select");
   SC.forEach(x => { const o = el("option", { value: x }, SCL[x]); if (x === REPSEL.scn) o.selected = true; sel.appendChild(o); });
   sel.onchange = () => { REPSEL.scn = sel.value; };
   c2.appendChild(sel);
+  c2.appendChild(el("p", { class: "hint" },
+    "По умолчанию подставлен сценарий, выбранный по действующему критерию."));
+  c2.appendChild(el("h4", null, "Ориентация листа отчета"));
+  [["port", "Книжная"], ["land", "Альбомная"]].forEach(([k, name]) => {
+    const lb = el("label");
+    const rb = el("input", { type: "radio", name: "reporient", value: k });
+    if (k === REPSEL.orient) rb.checked = true;
+    rb.onchange = () => { REPSEL.orient = k; };
+    lb.appendChild(rb); lb.appendChild(document.createTextNode(" " + name));
+    c2.appendChild(lb);
+  });
+  c2.appendChild(el("p", { class: "hint" },
+    "Ориентация задает ширину таблиц и графиков отчета и размер страницы при печати."));
   c2.appendChild(el("p", { class: "hint" },
     MCR ? ("Прогоны выполнены, в отчет войдут результаты " + MCR.N + " прогонов")
         : "Прогоны не выполнялись. Раздел имитационного моделирования войдет в отчет после расчета на вкладке «Имитационное моделирование»"));
@@ -1190,7 +1242,7 @@ function vRep(box) {
     const keys = {};
     REP_SECTIONS.forEach(([k]) => { if (boxes[k].checked) keys[k] = true; });
     if (!Object.keys(keys).length) { alert("Выберите хотя бы один раздел"); return; }
-    reportView({ depth: REPSEL.depth, sections: keys, scn: REPSEL.scn });
+    reportView({ depth: REPSEL.depth, sections: keys, scn: REPSEL.scn, orient: REPSEL.orient });
   };
   act.appendChild(go);
   w.appendChild(act);
@@ -1214,6 +1266,14 @@ function reportView(opts) {
   const full = opts.depth === "full", std = opts.depth !== "short";
   const box = document.getElementById("report");
   box.innerHTML = "";
+  /* ориентация листа задает ширину содержимого и размер страницы при печати */
+  const orient = opts.orient === "port" ? "port" : "land";
+  document.body.classList.toggle("rp-port", orient === "port");
+  document.body.classList.toggle("rp-land", orient === "land");
+  let pg = document.getElementById("pgsz");
+  if (!pg) { pg = document.createElement("style"); pg.id = "pgsz"; document.head.appendChild(pg); }
+  pg.textContent = "@media print{@page{size:A4 " +
+    (orient === "port" ? "portrait" : "landscape") + ";margin:12mm 10mm}}";
   let num = 0;
   const sec = (k, name) => { if (!opts.sections[k]) return false; num++; repSec(box, num + ". " + name, num === 1); return true; };
 
@@ -1228,12 +1288,13 @@ function reportView(opts) {
   box.appendChild(table(["Показатель", "Значение"], [
     ["Дата формирования отчета", dd(now.getDate()) + "." + dd(now.getMonth() + 1) + "." + now.getFullYear()
       + " " + dd(now.getHours()) + ":" + dd(now.getMinutes())],
-    ["Версия расчетного модуля", "1.6"],
+    ["Версия расчетного модуля", "1.7"],
     ["Бюджет проекта, млн руб.", nf(p.budget, 1)],
     ["Доля инновационной части, %", nf(p.share_inn * 100, 1)],
     ["Ставка дисконтирования, % годовых", nf(p.rate * 100, 1)],
     ["Расчетный период, лет", String(p.n_years)],
-    ["Глубина детализации", (REP_DEPTHS.find(x => x[0] === opts.depth) || ["", ""])[1].split(".")[0]]
+    ["Глубина детализации", (REP_DEPTHS.find(x => x[0] === opts.depth) || ["", ""])[1].split(".")[0]],
+    ["Ориентация листа", orient === "port" ? "Книжная" : "Альбомная"]
   ]));
   box.appendChild(el("p", { class: "concl" },
     "Расчет выполнен программой модели по введенным значениям. Суммы приведены в млн руб. "
@@ -1298,27 +1359,21 @@ function reportView(opts) {
   /* 5. потоки */
   if (sec("flows", "Денежные потоки")) {
     box.appendChild(el("p", { class: "note" },
-      "Годовые потоки показаны графически. Итоговая таблица содержит приведенные величины, "
-      + "из которых складывается чистый дисконтированный доход."));
+      "Годовой поток показан столбчатой диаграммой, как на вкладке «Годовые потоки». Итоговая "
+      + "таблица содержит приведенные величины, из которых складывается чистый дисконтированный доход."));
     const s0 = opts.scn || "TRL6";
     const rows = R.scn[s0].rows;
     box.appendChild(el("h4", null, SCL[s0] + ". Денежный поток по годам"));
     box.appendChild(flowChart(rows, ""));
     box.appendChild(legend([{ k: "Инновационные затраты", c: COL.TRL6 },
                             { k: "Инвестиционные затраты", c: COL.TRL5 },
-                            { k: "Поступления от эксплуатации", c: "#9fb8cf" },
+                            { k: "Операционный поток после налога", c: "#9fb8cf" },
                             { k: "Накопленный дисконтированный поток", c: "#003366" }]));
     box.appendChild(el("p", { class: "note" },
       "Столбцы вниз показывают затраты года, причем инновационные затраты включают опытную "
       + "инфраструктуру, затраты на доработки и затраты ожидания. Столбцы вверх показывают "
       + "поступления от эксплуатации за вычетом налога. Линия показывает накопленный "
       + "дисконтированный поток."));
-    box.appendChild(el("h4", null, SCL[s0] + ". Годовой денежный поток"));
-    box.appendChild(lineChart(rows.map(r => r.year),
-      [{ k: "Поток", c: COL[s0], v: rows.map(r => r.cf) },
-       { k: "Дисконтированный поток", c: "#0079C2", v: rows.map(r => r.pv) }],
-      "", "календарный год", "млн руб.", x => String(x), { labels: false, dots: false }));
-    box.appendChild(legend([{ k: "Поток", c: COL[s0] }, { k: "Дисконтированный поток", c: "#0079C2" }]));
     box.appendChild(el("h4", null, "Итоговая таблица приведенных величин"));
     box.appendChild(table(["Сценарий", "Приведенные поступления", "Приведенные вложения",
       "Приведенный налог", "ЧДД, млн руб."],
@@ -1698,7 +1753,7 @@ function vMC(box) {
   w.appendChild(el("p", { class: "note" },
     "В каждом прогоне сроки разработки и строительства, вероятности и затраты доработок, выручка и ставка дисконтирования отклоняются одновременно и случайно, а доработки наступают случайно с заданными вероятностями. Все четыре сценария одного прогона считаются на одном наборе отклонений, поэтому сценарии сравнимы между собой."));
   w.appendChild(el("p", { class: "note" },
-    "Приняты следующие отклонения. Сроки разработки и строительства, а также выручка отклоняются на 15 %, вероятности событий на 50 %, затраты и задержки событий на 40 %, ставка дисконтирования распределена равномерно от 10 до 16 %. Для логнормальных множителей указано стандартное отклонение логарифма. Среднее множителя равно единице."));
+    "Приняты следующие отклонения. Сроки разработки и строительства, а также выручка отклоняются на 15 %, вероятности событий на 50 %, затраты и задержки событий на 40 %, ставка дисконтирования распределена равномерно от 10 до 16 %."));
   const bar = el("div", { class: "bar" });
   bar.appendChild(el("span", null, "Число прогонов"));
   const selN = el("select");
@@ -1749,6 +1804,7 @@ function vMC(box) {
         return [SCL[s], nf(m.p10, 1), nf(m.p50, 1), nf(m.p90, 1), nf(m.mean, 1), pct(m.neg),
           s === "BASE" ? "—" : pct(m.beat_base), pct(m.best)]; }), "wide")));
   const hc = card("Распределение чистого дисконтированного дохода по сценариям");
+  hc.className = "card gfull";
   const hbar = el("div", { class: "bar" });
   const cb = el("input", { type: "checkbox", id: "mc_sm" });
   cb.checked = !!MCSM;
@@ -1767,13 +1823,10 @@ function vMC(box) {
     " % в сценарии «Интеграция TRL5»."));
   box.appendChild(hc);
   const cc = card("Облако прогонов: доход и ставка дисконтирования", cloudChart(M));
+  cc.className = "card gfull";
   cc.appendChild(el("p", { class: "note" },
     "Каждая точка — один прогон, цвет означает сценарий. По горизонтали отложена ставка дисконтирования этого прогона, по вертикали полученный чистый дисконтированный доход. Жирные линии показывают медиану сценария в двенадцати диапазонах ставки, рядом с правым краем указана медиана сценария по всем прогонам. Линия ломаная, поскольку каждая ее точка это медиана фактических прогонов, а сглаживание добавило бы значения, которых в расчете не было. Для читаемости показаны прогоны между 0,4 и 99,6 процентилями."));
   box.appendChild(cc);
-  const c = card("Диапазон чистого дисконтированного дохода от P10 до P90",
-    rangeChart(SC.map(s => ({ k: SCL[s], p10: M.scn[s].p10, p50: M.scn[s].p50, p90: M.scn[s].p90, c: COL[s] })), "млн руб."));
-  c.appendChild(el("p", { class: "note" }, "Точка обозначает медиану прогонов. Между границами P10 и P90 находится 80 % исходов."));
-  box.appendChild(c);
   box.appendChild(card("Преимущество сценариев интеграции к базовому сценарию",
     table(["Сценарий", "P10, млн руб.", "Медиана, млн руб.", "P90, млн руб.", "Прогонов с преимуществом, %"],
       ["TRL7", "TRL6", "TRL5"].map(s => { const m = M.scn[s];
@@ -1870,7 +1923,9 @@ window.addEventListener("DOMContentLoaded", () => {
           if (!Number.isSafeInteger(o.loss_limit_last_n) || o.loss_limit_last_n<0) throw Error("Неверный срок ограничения убытков");
           loaded.loss_limit_end=loaded.first_tax_year+o.loss_limit_last_n-1;
         }
-        if (!Object.hasOwn(o,"prefer_reserve")) loaded.prefer_reserve=false;
+        if (!Object.hasOwn(o,"criterion"))
+          loaded.criterion = o.use_crit ? "crit" : (o.prefer_reserve === false ? "npv" : "reserve");
+        delete loaded.prefer_reserve; delete loaded.use_crit;
         validateInputs(loaded);
         STATE=loaded;
         buildForm(); compute();

@@ -6,6 +6,8 @@ from openpyxl.workbook.defined_name import DefinedName
 from openpyxl.utils import get_column_letter as L
 
 R = json.load(open("results.json"))
+# Число переходов, затраты которых признаются расходами по статье 262 (до вовлечения в инвестиционный проект)
+N_EXP = {"BASE": 3, "TRL5": 4, "TRL6": 5, "TRL7": 6}
 P = R["params"]; D = R["derived"]
 wb = Workbook()
 F_IN = Font(name="Times New Roman", size=11, color="0000FF")
@@ -154,7 +156,7 @@ EVR = {k: EV0 + k - 1 for k in range(1, 10)}      # строка уровня TR
 # ---------------------------------------------------------------- Эксплуатация
 wsO = wb.create_sheet("Эксплуатация")
 put(wsO, "A1", "Годы эксплуатации от даты ввода (не календарные): плановые потоки по годам эксплуатации j", F_T, border=False)
-header(wsO, 3, ["Год экспл. j", "Загрузка", "Выручка, млн руб.", "Опер. затраты, млн руб.", "ТО, млн руб.", "ТР, млн руб.", "КР, млн руб.", "Амортизация, млн руб.", "ТОиР всего, млн руб."],
+header(wsO, 3, ["Год экспл. j", "Загрузка", "Выручка, млн руб.", "Опер. затраты, млн руб.", "ТО, млн руб.", "ТР, млн руб.", "КР, млн руб.", "Признак года амортизации", "ТОиР всего, млн руб."],
        [12, 12, 16, 16, 14, 14, 14, 18, 16], 45)
 O0 = 4
 for j in range(1, 31):
@@ -166,10 +168,10 @@ for j in range(1, 31):
     put(wsO, "E%d" % r, "=TO_amt", fmt="0.00")
     put(wsO, "F%d" % r, "=IF(MOD(A%d,3)=0,TR_amt,0)" % r, fmt="0.00")
     put(wsO, "G%d" % r, "=IF(MOD(A%d,5)=0,KR_amt,0)" % r, fmt="0.00")
-    put(wsO, "H%d" % r, "=IF(A%d<=Amort_N,B_INV/Amort_N,0)" % r, fmt="0.00")
+    put(wsO, "H%d" % r, "=IF(A%d<=Amort_N,1,0)" % r, fmt="0")
     put(wsO, "I%d" % r, "=E%d+F%d+G%d" % (r, r, r), fmt="0.00")
 put(wsO, "A%d" % (O0 + 30), "Итого", F_B)
-for c in "CDEFGHI":
+for c in "CDEFGI":
     put(wsO, "%s%d" % (c, O0 + 30), "=SUM(%s%d:%s%d)" % (c, O0, c, O0 + 29), F_B, "0.00")
 OC = {k: "Эксплуатация!$%s$%d:$%s$%d" % (c, O0, c, O0 + 29) for k, c in zip(["load", "rev", "opex", "to", "tr", "kr", "am", "toir"], "BCDEFGHI")}
 
@@ -352,6 +354,14 @@ for s in SCN4:
         put(wsY, "A%d" % (3 + i), lab, F_B, align=LEFT)
         put(wsY, "B%d" % (3 + i), v, F_IN if i == 1 else F_N, fmt, FILL_IN if i == 1 else None)
     put(wsY, "A8", "Показатели эффективности (после налога)", F_B, border=False)
+    ne = N_EXP[s]
+    cap_f = "=" + "+".join("Сети!$F$%d" % TC[s][k] for k in range(ne, 8)) if ne < 8 else "=0"
+    put(wsY, "A10", "Инновационные затраты, признаваемые расходами (переходы до входа)", F_B, align=LEFT)
+    put(wsY, "B10", "=B_INN-B11", F_N, "0.00")
+    put(wsY, "A11", "Инновационные затраты, формирующие стоимость объекта", F_B, align=LEFT)
+    put(wsY, "B11", cap_f, F_N, "0.00")
+    put(wsY, "A12", "Первоначальная стоимость объекта (амортизируемая)", F_B, align=LEFT)
+    put(wsY, "B12", "=B_INV+B11+F%d" % (Y0 + NY), F_N, "0.00")
     wsY.column_dimensions["A"].width = 44
     # заголовки таблицы
     heads = ["n", "Год", "Инновационные затраты", "Опытная инфраструктура", "Прочие инвестиции", "Прямые затраты доработок и дополнительные затраты сценария", "Капитальные затраты всего",
@@ -379,8 +389,8 @@ for s in SCN4:
         put(wsY, "J%d" % r, opf("to", r), fmt="0.00"); put(wsY, "K%d" % r, opf("tr", r), fmt="0.00"); put(wsY, "L%d" % r, opf("kr", r), fmt="0.00")
         put(wsY, "M%d" % r, "=SUM(J%d:L%d)" % (r, r), fmt="0.00")
         put(wsY, "N%d" % r, "=H%d-I%d-M%d" % (r, r, r), fmt="0.00")
-        put(wsY, "O%d" % r, opf("am", r), fmt="0.00")
-        put(wsY, "P%d" % r, "=SUMPRODUCT((Сети!$E$%d:$E$%d=A%d)*Сети!$F$%d:$F$%d)" % (TC[s][0], TC[s][7], r, TC[s][0], TC[s][7]), fmt="0.00")
+        put(wsY, "O%d" % r, "=(" + opf("am", r)[1:] + ")*$B$12/Amort_N", fmt="0.00")
+        put(wsY, "P%d" % r, "=SUMPRODUCT((Сети!$E$%d:$E$%d=A%d)*Сети!$F$%d:$F$%d)+D%d" % (TC[s][0], TC[s][ne - 1], r, TC[s][0], TC[s][ne - 1], r), fmt="0.00")
         put(wsY, "Q%d" % r, "=N%d-O%d-P%d" % (r, r, r), fmt="0.00")
         put(wsY, "R%d" % r, 0 if n == 1 else "=V%d" % (r - 1), fmt="0.00")
         put(wsY, "S%d" % r, "=MAX(-Q%d,0)" % r, fmt="0.00")
@@ -413,8 +423,8 @@ for s in SCN4:
            ("Срок окупаемости PP, лет от t = 0", '=IF(COUNT(AG%d:AG%d)=0,"не достигается",MIN(AG%d:AG%d))' % (Y0, YL, Y0, YL), "0.00"),
            ("Дисконтированный срок окупаемости DPP, лет от t = 0", '=IF(COUNT(AH%d:AH%d)=0,"не достигается",MIN(AH%d:AH%d))' % (Y0, YL, Y0, YL), "0.00"),
            ("Внутренняя норма доходности IRR", "=IRR(Z%d:Z%d,0.1)" % (Y0, YL), "0.00%"),
-           ("Проверка: сумма признанных НИОКР = B_INN", '=IF(ABS(P%d-B_INN)<0.000001,"верно","ОШИБКА")' % rt, None),
-           ("Проверка: амортизация = B_INV (без повторной амортизации инноваций)", '=IF(ABS(O%d-B_INV)<0.000001,"верно","ОШИБКА")' % rt, None),
+           ("Проверка: признанные расходы = инновационные расходы + опытная инфраструктура", '=IF(ABS(P%d-(B10+D%d))<0.000001,"верно","ОШИБКА")' % (rt, rt), None),
+           ("Проверка: амортизация = первоначальная стоимость объекта", '=IF(ABS(O%d-B12)<0.000001,"верно","ОШИБКА")' % rt, None),
            ("Проверка: убыток на конец горизонта = 0", '=IF(ABS(V%d)<0.000001,"верно","убыток не использован")' % YL, None)]
     # показатели размещаем справа от меты (D3:...): строки 3–10, столбец D-E
     for i, (lab, f, fmt) in enumerate(ind):
@@ -529,7 +539,8 @@ def make_block(ws, top, s_, title, bit_refs, evs, mult_f):
         ex = "+".join("%s*%s*$B$%d*(ROUNDUP(ROUND(%s,9),0)=$A%d)" % (b_, e_["cost"], top + 1, e_["t"], r) for b_, e_ in zip(bit_refs, evs))
         put(ws, "C%d" % r, "=" + ex, fmt="0.00")
         put(ws, "D%d" % r, opf_(OC["rev"], r), fmt="0.00"); put(ws, "E%d" % r, opf_(OC["opex"], r), fmt="0.00")
-        put(ws, "F%d" % r, opf_(OC["toir"], r), fmt="0.00"); put(ws, "G%d" % r, opf_(OC["am"], r), fmt="0.00")
+        put(ws, "F%d" % r, opf_(OC["toir"], r), fmt="0.00")
+        put(ws, "G%d" % r, "=(" + opf_(OC["am"], r)[1:] + ")*('Год_%s'!$B$12+SUM($C$%d:$C$%d))/Amort_N" % (c_, r0_, rl_), fmt="0.00")
         put(ws, "H%d" % r, "='Год_%s'!P%d" % (c_, yr), fmt="0.00")
         put(ws, "I%d" % r, "=D%d-E%d-F%d" % (r, r, r), fmt="0.00")
         put(ws, "J%d" % r, "=I%d-G%d-H%d" % (r, r, r), fmt="0.00")

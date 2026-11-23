@@ -140,6 +140,11 @@ def schedule(scn, p: P):
                 net_conf=conf_s, scn=scn)
 
 
+# Число переходов между уровнями готовности, затраты которых признаются расходами
+# по статье 262. Граница определяется точкой вовлечения разработки в инвестиционный проект.
+N_EXP = {"BASE": 3, "TRL5": 4, "TRL6": 5, "TRL7": 6}
+
+
 def pilot_window(sch):
     # опытная инфраструктура создается в окне перехода TRL5→6 (инфраструктура для очередного испытания — первой)
     return sch["trl_start"][4], sch["conf"][4]
@@ -159,11 +164,19 @@ def flows(scn, p: P, delay_days=0.0, extra=(), sch=None):
     rows = []
     # плановые затраты
     inn_cash = [[spread(sch["trl_start"][k], sch["conf"][k], w / 100.0 * p.b_inn, n) for k, w in enumerate(p.w_tax)] for n in range(1, N + 1)]
-    # налоговое признание инновационных расходов по завершении этапов
+    # Налоговое признание инновационных затрат. Расходами по статье 262 признаются затраты
+    # переходов, завершенных до вовлечения разработки в инвестиционный проект. Затраты
+    # последующих переходов формируют первоначальную стоимость объекта и амортизируются.
+    n_exp = N_EXP[scn]
     rec = [0.0] * N
+    cap_inn = 0.0
     for k, w in enumerate(p.w_tax):
-        y = year_of(sch["conf"][k])
-        if y <= N: rec[y - 1] += w / 100.0 * p.b_inn
+        amt = w / 100.0 * p.b_inn
+        if k < n_exp:
+            y = year_of(sch["conf"][k])
+            if y <= N: rec[y - 1] += amt
+        else:
+            cap_inn += amt
     pilot = [0.0] * N
     if scn in ("BASE", "TRL7"):
         a, b = pilot_window(sch)
@@ -190,6 +203,10 @@ def flows(scn, p: P, delay_days=0.0, extra=(), sch=None):
                 for n in range(1, N + 1):
                     t7x[n - 1] += spread(a, b, p.t7_store * p.b_inn * lag, n)
         t7x[year_of(sch["tv"]) - 1] += p.t7_warr_p * p.t7_warr_cost * p.b_inn
+    # Первоначальная стоимость объекта: инвестиционная часть, капитализированные инновационные
+    # затраты, затраты подтверждения уровней на объекте и доработки до ввода. Затраты
+    # на опытную инфраструктуру в стоимость объекта не входят, она демонтируется.
+    am_base = p.b_inv + cap_inn + sum(t7x) + sum(exc)
     # эксплуатация: по годам эксплуатации j
     def opj(j, kind):
         if j < 1 or j > p.op_years: return 0.0
@@ -198,7 +215,7 @@ def flows(scn, p: P, delay_days=0.0, extra=(), sch=None):
         if kind == "to": return p.to
         if kind == "tr": return p.tr if j in p.tr_years else 0.0
         if kind == "kr": return p.kr if j in p.kr_years else 0.0
-        if kind == "am": return p.b_inv / p.amort_years if j <= p.amort_years else 0.0
+        if kind == "am": return am_base / p.amort_years if j <= p.amort_years else 0.0
     def cal(n, kind):
         j = n - m
         return (1 - phi) * opj(j, kind) + phi * opj(j - 1, kind)
@@ -218,7 +235,7 @@ def flows(scn, p: P, delay_days=0.0, extra=(), sch=None):
         r["to"] = cal(n, "to"); r["tr"] = cal(n, "tr"); r["kr"] = cal(n, "kr")
         r["toir"] = r["to"] + r["tr"] + r["kr"]
         r["am"] = cal(n, "am")
-        r["rnd"] = rec[n - 1]
+        r["rnd"] = rec[n - 1] + r["pilot"]   # расходы периода: НИОКР по статье 262 и опытная инфраструктура
         r["ebitda"] = r["rev"] - r["opex"] - r["toir"]
         r["base"] = r["ebitda"] - r["am"] - r["rnd"]
         lim = p.loss_limit if r["year"] <= p.loss_limit_end else 1.0
