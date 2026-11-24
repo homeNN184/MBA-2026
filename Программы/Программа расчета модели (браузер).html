@@ -155,7 +155,7 @@ tr.pick td{background:#E2EFDA;font-weight:600}
 <h1>Модель управления инновационной деятельностью при реализации инвестиционного проекта. Расчет сценариев интеграции</h1>
 <p>Расчет чистого дисконтированного дохода, сроков и устойчивости по четырем сценариям. Суммы в млн руб. в постоянных ценах, время в годах от начала разработки</p>
 </div>
-<div class="hsig">Дипломный проект, версия программы 1.7 от 23.11.2026<br><b>Автор Постаутов К.В.</b></div>
+<div class="hsig">Дипломный проект, версия программы 1.8 от 24.11.2026<br><b>Автор Постаутов К.В.</b></div>
 </div>
 </header>
 <div class="wrap">
@@ -458,6 +458,45 @@ function outcomes(scn,p,sch){
   return {events:active, items:res, npv0:n0, E_npv:E, E_loss:n0-E};
 }
 
+/* ---------- порог безразличия между сценариями TRL5 и TRL6 ---------- */
+/* Для заданных вероятности и задержки события шестого уровня находится прямой ущерб,
+   при котором ожидаемый ЧДД сценария TRL5 равен ожидаемому ЧДД сценария TRL6.
+   Ниже найденного значения предпочтителен ранний вход, выше — вход на шестом уровне. */
+function solveBisect(f,a,b,it){
+  it = it || 60;
+  let fa = f(a), fb = f(b);
+  if (fa === 0) return a;
+  if (fb === 0) return b;
+  if ((fa < 0) === (fb < 0)) return (fa < 0) ? b : a;
+  for (let i=0;i<it;i++){
+    const m = (a+b)/2, fm = f(m);
+    if ((fa < 0) === (fm < 0)){ a = m; fa = fm; } else { b = m; }
+  }
+  return (a+b)/2;
+}
+function thr56(p, delays, probs, cmax){
+  delays = delays || [104,150,200];
+  probs = probs || [0.05,0.10,0.20,0.30,0.40,0.50,0.70,1.00];
+  cmax = cmax || 5000;
+  const E6 = outcomes("TRL6",p).E_npv;
+  const out = [];
+  for (const d of delays){
+    const row = [];
+    for (const pr of probs){
+      const f = c => {
+        const q = P(Object.assign({}, p, {ev6_cost_abs:c, ev6_delay_abs:d, ev6_p_abs:pr}));
+        return outcomes("TRL5",q).E_npv - E6;
+      };
+      const f0 = f(0);
+      if (f0 <= 0){ row.push([pr, null]); continue; }
+      if (f(cmax) > 0){ row.push([pr, cmax]); continue; }
+      row.push([pr, solveBisect(f, 0, cmax)]);
+    }
+    out.push({delay:d, points:row});
+  }
+  return {E6:E6, curves:out, probs:probs};
+}
+
 /* ---------- запас устойчивости и шестикритериальная оценка (раздел 3.3) ---------- */
 /* Наихудший исход наступает, когда происходят все возможные события доработки,
    поэтому перебор сочетаний не нужен. Множитель m масштабирует затраты и задержки. */
@@ -581,14 +620,14 @@ function monteCarlo(p,N,seed){
   return mc;
 }
 
-if (typeof module !== "undefined") module.exports = {N_EXP,worstNpv,criticalM,scoreOptions,CRIT_NAMES,P,schedule,flows,npv,npv_at,irr,payback,indicators,outcomes,ev_params,event_scope,pilot_window,monteCarlo,rngMake,mcDraw,mcOne,SCENARIOS,INTEG,SCN_TITLE,TRL_NAMES,STAGE_NAMES,DEFAULTS};
+if (typeof module !== "undefined") module.exports = {N_EXP,thr56,solveBisect,worstNpv,criticalM,scoreOptions,CRIT_NAMES,P,schedule,flows,npv,npv_at,irr,payback,indicators,outcomes,ev_params,event_scope,pilot_window,monteCarlo,rngMake,mcDraw,mcOne,SCENARIOS,INTEG,SCN_TITLE,TRL_NAMES,STAGE_NAMES,DEFAULTS};
 
 const MODEL = {P:P, schedule:schedule, flows:flows, npv:npv, npv_at:npv_at, irr:irr, payback:payback,
   indicators:indicators, outcomes:outcomes, ev_params:ev_params, event_scope:event_scope,
   pilot_window:pilot_window, monteCarlo:monteCarlo, SCENARIOS:SCENARIOS, INTEG:INTEG, SCN_TITLE:SCN_TITLE,
   TRL_NAMES:TRL_NAMES, STAGE_NAMES:STAGE_NAMES, DEFAULTS:DEFAULTS,
   worstNpv:worstNpv, criticalM:criticalM, scoreOptions:scoreOptions, CRIT_NAMES:CRIT_NAMES,
-  N_EXP:N_EXP};
+  N_EXP:N_EXP,thr56:thr56};
 /* Автор и разработчик: Postautov_K_V */
 /* Интерфейс браузерной программы расчета модели интеграции */
 const C = ["#2F6FC0", "#C4690E", "#8E44AD", "#1B9E77"];
@@ -1443,6 +1482,40 @@ function riskContribChart(R) {
   s.appendChild(sv("text", { x: 0, y: H - 6, class: "ax" }, "млн руб."));
   return s;
 }
+/* порог безразличия TRL5/TRL6: кривые по трем задержкам */
+function thrChart(TH) {
+  const W = 680, H = 320, L = 74, Rr = 150, T = 34, B = 54;
+  const s = svgBox(W, H);
+  s.appendChild(sv("text", { x: 0, y: 16, class: "ct" },
+    "Область предпочтения сценариев по вероятности и ущербу события TRL6"));
+  let hi = 0;
+  TH.curves.forEach(c => c.points.forEach(p => { if (p[1] !== null && p[1] > hi) hi = p[1]; }));
+  hi = hi > 0 ? hi * 1.1 : 1;
+  const pmax = Math.max.apply(null, TH.probs);
+  const x = v => L + v / pmax * (W - L - Rr);
+  const y = v => H - B - v / hi * (H - B - T);
+  for (let i = 0; i <= 4; i++) {
+    const v = hi * i / 4;
+    s.appendChild(sv("line", { x1: L, x2: W - Rr, y1: y(v), y2: y(v), class: "grid" }));
+    s.appendChild(sv("text", { x: L - 8, y: y(v) + 4, class: "ax", "text-anchor": "end" }, nf(v, 0)));
+  }
+  TH.probs.forEach(p => s.appendChild(sv("text", { x: x(p), y: H - B + 16, class: "ax", "text-anchor": "middle" }, nf(p, 2))));
+  s.appendChild(sv("text", { x: L, y: H - 8, class: "ax" }, "вероятность события TRL6"));
+  s.appendChild(sv("text", { x: 0, y: T - 6, class: "ax" }, "прямой ущерб, млн руб."));
+  const cols = [COL.TRL5, COL.TRL6, COL.TRL7];
+  TH.curves.forEach((c, i) => {
+    const a = c.points.filter(p => p[1] !== null);
+    if (!a.length) return;
+    const d = a.map((p, k) => (k ? "L" : "M") + x(p[0]) + " " + y(p[1])).join(" ");
+    s.appendChild(sv("path", { d: d, fill: "none", stroke: cols[i], "stroke-width": 2 }));
+    a.forEach(p => s.appendChild(sv("circle", { cx: x(p[0]), cy: y(p[1]), r: 3.4, fill: cols[i] })));
+    const ly = T + 6 + i * 20;
+    s.appendChild(sv("line", { x1: W - Rr + 10, x2: W - Rr + 34, y1: ly, y2: ly, stroke: cols[i], "stroke-width": 2 }));
+    s.appendChild(sv("text", { x: W - Rr + 40, y: ly + 4, class: "ax", fill: cols[i] },
+      "задержка " + c.delay + " сут."));
+  });
+  return s;
+}
 function vEv(box) {
   const R = RES;
   const rc = card("Анализ риска доработок");
@@ -1467,6 +1540,17 @@ function vEv(box) {
       " млн руб. Наихудший исход: " + nf(Math.min.apply(null, o.items.map(i => i.npv)), 1) + " млн руб."));
     box.appendChild(card(SCL[s], w));
   });
+  const TH = MODEL.thr56(R.p);
+  const tw = el("div");
+  tw.appendChild(thrChart(TH));
+  tw.appendChild(table(["Вероятность события TRL6"].concat(TH.curves.map(c => "Задержка " + c.delay + " сут.")),
+    TH.probs.map((pr, i) => [nf(pr, 2)].concat(TH.curves.map(c => c.points[i][1] === null ? "нет" : nf(c.points[i][1], 0))))));
+  tw.appendChild(el("p", { class: "note" },
+    "Порог равен прямому ущербу события шестого уровня, при котором ожидаемый ЧДД сценария «Интеграция TRL5» "
+    + "сравнивается с ожидаемым ЧДД сценария «Интеграция TRL6» (" + nf(TH.E6, 1) + " млн руб.). "
+    + "При меньшем ущербе предпочтителен ранний вход, при большем вход на шестом уровне. "
+    + "Отметка «нет» означает, что вход на шестом уровне предпочтителен при любом ущербе."));
+  box.appendChild(card("Порог безразличия между сценариями TRL5 и TRL6", tw));
 }
 function decision(R) {
   const rows = INTEG.map(key => {
